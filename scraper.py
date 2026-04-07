@@ -40,8 +40,14 @@ class Event:
     hash: str = ""
 
     def __post_init__(self):
-        # Unique identity = venue + artist + date
-        key = f"{self.venue}|{self.artist}|{self.date_text}".lower().strip()
+        # Unique identity = venue + artist + date (+ URL if available)
+        # Prefer date_parsed for consistency, fallback to date_text
+        date_for_hash = self.date_parsed if self.date_parsed else self.date_text
+
+        # Include ticket_url to catch duplicates with different date representations
+        url_for_hash = self.ticket_url or self.detail_url or ""
+
+        key = f"{self.venue}|{self.artist}|{date_for_hash}|{url_for_hash}".lower().strip()
         self.hash = hashlib.sha256(key.encode()).hexdigest()[:16]
 
 
@@ -153,6 +159,8 @@ async def scrape_aeg_venue(page: Page, url: str, venue_name: str) -> list[Event]
     soup = BeautifulSoup(html, "html.parser")
     events = []
     seen_hashes = set()
+    # Track venue+artist to filter TBA duplicates
+    venue_artist_dates = {}
 
     # AEG sites use various card structures; try multiple selectors
     # Look for JSON-LD first (best case)
@@ -240,7 +248,36 @@ async def scrape_aeg_venue(page: Page, url: str, venue_name: str) -> list[Event]
             events.append(event)
             seen_hashes.add(event.hash)
 
-    return events
+    # Additional deduplication: Remove "TBA" entries when we have the same artist with an actual date
+    filtered_events = []
+    artist_dates = {}  # Track best date for each artist
+
+    for event in events:
+        key = f"{event.venue}|{event.artist}".lower()
+
+        # Determine if this event has a real date
+        has_real_date = event.date_parsed or (event.date_text and event.date_text != "TBA" and len(event.date_text) > 3)
+
+        if key not in artist_dates:
+            artist_dates[key] = event
+        else:
+            # Keep the one with a real date
+            existing_has_date = artist_dates[key].date_parsed or (artist_dates[key].date_text and artist_dates[key].date_text != "TBA" and len(artist_dates[key].date_text) > 3)
+
+            if has_real_date and not existing_has_date:
+                # Replace TBA with real date
+                artist_dates[key] = event
+            elif not has_real_date and existing_has_date:
+                # Keep the existing one with real date
+                pass
+            else:
+                # Both have dates or both are TBA - keep both
+                filtered_events.append(event)
+
+    # Add all the best entries
+    filtered_events.extend(artist_dates.values())
+
+    return filtered_events
 
 
 async def scrape_the_earl(page: Page) -> list[Event]:
@@ -440,6 +477,45 @@ def try_parse_date(text: str) -> Optional[str]:
     return None
 
 
+def format_display_date(event: Event) -> str:
+    """Format event date as '(Day) Month DDth' for consistent display."""
+    date_to_parse = event.date_parsed
+
+    # If no parsed date, try to parse the raw date_text
+    if not date_to_parse and event.date_text:
+        date_to_parse = try_parse_date(event.date_text)
+
+    # If we have a parseable date, format it nicely
+    if date_to_parse:
+        try:
+            # Handle ISO format or YYYY-MM-DD
+            if re.match(r'\d{4}-\d{2}-\d{2}', date_to_parse):
+                dt = datetime.strptime(date_to_parse[:10], "%Y-%m-%d")
+            else:
+                # Try to parse ISO datetime format
+                dt = datetime.fromisoformat(date_to_parse.replace('Z', '+00:00'))
+
+            day_name = dt.strftime("%a")  # Mon, Tue, Wed, etc.
+            month_name = dt.strftime("%B")  # January, February, etc.
+            day = dt.day
+
+            # Add ordinal suffix (st, nd, rd, th)
+            if 10 <= day % 100 <= 20:
+                suffix = "th"
+            else:
+                suffix = {1: "st", 2: "nd", 3: "rd"}.get(day % 10, "th")
+
+            return f"({day_name}) {month_name} {day}{suffix}"
+        except (ValueError, AttributeError):
+            pass
+
+    # Fallback to raw date text if we have it
+    if event.date_text:
+        return event.date_text
+
+    return "TBA"
+
+
 # ─── Config ───────────────────────────────────────────────────────────────────
 
 CONFIG_PATH = Path(__file__).parent / "config.json"
@@ -464,7 +540,7 @@ def build_email_html(new_events: list[Event]) -> str:
                      f'font-weight:bold;color:#1a1a2e;border-bottom:2px solid #e94560;">'
                      f'📍 {venue}</td></tr>')
         for e in by_venue[venue]:
-            date_str = e.date_parsed or e.date_text or "TBA"
+            date_str = format_display_date(e)
             price_str = e.price or ""
             link = ""
             if e.ticket_url:
@@ -519,7 +595,7 @@ def send_email(new_events: list[Event], config: dict):
     for venue in sorted(by_venue):
         plain_lines.append(f"\n{venue}")
         for e in by_venue[venue]:
-            date_str = e.date_parsed or e.date_text or "TBA"
+            date_str = format_display_date(e)
             price_str = f" — {e.price}" if e.price else ""
             plain_lines.append(f"  {date_str}  {e.artist}{price_str}")
     plain_text = f"{len(new_events)} new shows found:\n" + "\n".join(plain_lines)
@@ -628,7 +704,7 @@ async def run_scraper():
         for venue, events in sorted(by_venue.items()):
             print(f"  📍 {venue}")
             for e in events:
-                date_str = e.date_parsed or e.date_text or "TBA"
+                date_str = format_display_date(e)
                 price_str = f" — {e.price}" if e.price else ""
                 print(f"     {date_str}  {e.artist}{price_str}")
             print()
