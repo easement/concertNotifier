@@ -114,10 +114,12 @@ async def scroll_to_bottom(page: Page, max_scrolls: int = 50, wait_ms: int = 200
         prev_height = curr_height
 
 async def click_load_more(page: Page, selector: str, max_clicks: int = 30, wait_ms: int = 2000):
-    """Click a 'Load More' button until it disappears."""
+    """Click a 'Load More' button until it disappears or becomes disabled."""
     for _ in range(max_clicks):
         btn = page.locator(selector)
         if await btn.count() == 0 or not await btn.first.is_visible():
+            break
+        if not await btn.first.is_enabled():
             break
         await btn.first.click()
         await page.wait_for_timeout(wait_ms)
@@ -442,6 +444,81 @@ async def scrape_aisle5(page: Page) -> list[Event]:
     return await scrape_aeg_venue(page, "https://aisle5atl.com/calendar", "Aisle 5")
 
 
+async def scrape_fox_theatre(page: Page) -> list[Event]:
+    """Fox Theatre (foxtheatre.org/events) — same platform as Cobb Energy Centre."""
+    return await scrape_pac_venue(page, "https://www.foxtheatre.org/events", "Fox Theatre", "https://www.foxtheatre.org")
+
+
+async def scrape_pac_venue(page: Page, url: str, venue_name: str, base_url: str) -> list[Event]:
+    """
+    Shared scraper for venues on the Paciolan/AXS platform
+    (Fox Theatre, Cobb Energy Centre). These share identical HTML structure.
+    """
+    html = await get_page_html(
+        page,
+        url,
+        wait_selector=".eventItem",
+        scroll=False,
+        load_more_selector="#loadMoreEvents",
+    )
+    soup = BeautifulSoup(html, "html.parser")
+    events = []
+    seen_hashes = set()
+
+    for card in soup.select(".eventItem.entry"):
+        title_el = card.select_one("h3.title a, h3.title")
+        if not title_el:
+            continue
+        artist = title_el.get_text(strip=True)
+        if not artist:
+            continue
+
+        # Date — for single dates grab all spans; for ranges, combine rangeFirst
+        # month+day with the year from rangeLast (the year lives there).
+        date_div = card.select_one(".date")
+        if date_div and date_div.select_one(".m-date__rangeFirst"):
+            month = date_div.select_one(".m-date__rangeFirst .m-date__month")
+            day   = date_div.select_one(".m-date__rangeFirst .m-date__day")
+            year  = date_div.select_one(".m-date__rangeLast .m-date__year")
+            parts = [el.get_text(strip=True) for el in [month, day, year] if el]
+            date_text = " ".join(p for p in parts if p)
+        else:
+            date_parts = card.select(".m-date__singleDate span")
+            date_text = " ".join(s.get_text(strip=True) for s in date_parts if s.get_text(strip=True))
+
+        time_el = card.select_one(".time .start")
+        show_time = time_el.get_text(strip=True) if time_el else None
+
+        ticket_el = card.select_one("a.tickets")
+        detail_el = card.select_one("a.more")
+        ticket_url = ticket_el["href"] if ticket_el and ticket_el.has_attr("href") else None
+        detail_url = detail_el["href"] if detail_el and detail_el.has_attr("href") else None
+        if detail_url and not detail_url.startswith("http"):
+            detail_url = base_url + detail_url
+
+        event = Event(
+            venue=venue_name,
+            artist=artist,
+            date_text=date_text,
+            date_parsed=try_parse_date(date_text),
+            doors=None,
+            show_time=show_time,
+            price=None,
+            ticket_url=ticket_url,
+            detail_url=detail_url,
+        )
+        if event.hash not in seen_hashes:
+            events.append(event)
+            seen_hashes.add(event.hash)
+
+    return events
+
+
+async def scrape_cobb_energy(page: Page) -> list[Event]:
+    """Cobb Energy Centre (cobbenergycentre.com/events)"""
+    return await scrape_pac_venue(page, "https://www.cobbenergycentre.com/events", "Cobb Energy Centre", "https://www.cobbenergycentre.com")
+
+
 # ─── Helpers ──────────────────────────────────────────────────────────────────
 
 def try_parse_date(text: str) -> Optional[str]:
@@ -461,11 +538,19 @@ def try_parse_date(text: str) -> Optional[str]:
         "%B %d, %Y",          # April 8, 2026
         "%m/%d/%Y",           # 04/08/2026
         "%A %b %d %Y",        # Wednesday Apr 8 2026
+        "%A %B %d %Y",        # Wednesday April 8 2026
+        "%b %d %Y",           # Apr 9 2026 (PAC venue normalized)
+        "%B %d %Y",           # April 9 2026
     ]
 
     # Clean up common noise
     cleaned = re.sub(r'\s+', ' ', text).strip()
     cleaned = re.sub(r'(\d+)(st|nd|rd|th)', r'\1', cleaned)
+    # Normalize PAC venue date fragments: "Apr. 9 / 2026" → "Apr 9 2026", "Apr 18 , 2026" → "Apr 18 2026"
+    cleaned = re.sub(r'(?<=\w)\.(?=\s)', '', cleaned)   # strip trailing dot from month abbrev
+    cleaned = re.sub(r'\s*/\s*', ' ', cleaned)           # " / " → " "
+    cleaned = re.sub(r'\s*,\s*', ' ', cleaned)           # " , " → " "
+    cleaned = re.sub(r'\s+', ' ', cleaned).strip()
 
     for fmt in formats:
         try:
@@ -672,6 +757,24 @@ async def run_scraper():
         print("Scraping Aisle 5...")
         try:
             events = await scrape_aisle5(page)
+            print(f"  Found {len(events)} events")
+            all_events.extend(events)
+        except Exception as e:
+            print(f"  ERROR: {e}")
+
+        # Fox Theatre
+        print("Scraping Fox Theatre...")
+        try:
+            events = await scrape_fox_theatre(page)
+            print(f"  Found {len(events)} events")
+            all_events.extend(events)
+        except Exception as e:
+            print(f"  ERROR: {e}")
+
+        # Cobb Energy Centre
+        print("Scraping Cobb Energy Centre...")
+        try:
+            events = await scrape_cobb_energy(page)
             print(f"  Found {len(events)} events")
             all_events.extend(events)
         except Exception as e:
