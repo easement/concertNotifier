@@ -18,6 +18,7 @@ from scraper import (
     scrape_the_earl,
     scrape_goat_farm,
     scrape_pac_venue,
+    scrape_masquerade,
     scrape_centerstage_atlanta_venue,
     scrape_center_stage,
     scrape_the_loft,
@@ -621,6 +622,238 @@ class TestEarlScraping:
         event = next(e for e in events if e.artist == "Cool Band")
         assert event.detail_url is not None
         assert "badearl.com/show/" in event.detail_url
+
+
+# ─── Masquerade Atlanta HTML Fixtures ────────────────────────────────────────
+
+MASQUERADE_HTML = """
+<html><body>
+<div class="js-eventList">
+
+  <!-- Hell at The Masquerade — has Ticketmaster link -->
+  <article class="event" role="article">
+    <section class="eventDetails">
+      <div class="eventDetails__detail eventDetails__detail--startDate">
+        <div class="eventStartDate" content="April 8, 2026 6:00 pm" itemprop="startDate">
+          <span class="eventStartDate__day">Wed</span>
+          <span class="eventStartDate__date">08</span>
+          <span class="eventStartDate__month">Apr</span>
+          <span class="eventStartDate__year">2026</span>
+        </div>
+      </div>
+      <div class="eventDetails__detail eventDetails__detail--main">
+        <header class="eventHeader">
+          <a class="wrapperLink" href="https://www.masqueradeatlanta.com/events/he-is-legend-5/">
+            <h3 class="eventHeader__topline">The Masquerade presents...</h3>
+            <h2 class="eventHeader__title js-listTitle" itemprop="name">He Is Legend</h2>
+            <h4 class="eventHeader__support js-listSupport">A Lot Like Birds</h4>
+          </a>
+        </header>
+        <div class="event-location">
+          <p class="event__location-room"><span class="js-listVenue">Hell</span> at The Masquerade</p>
+          <div class="time-show">Doors 6:00 pm / All Ages</div>
+        </div>
+      </div>
+      <div class="eventDetails__detail">
+        <div class="event-ticketInfo">
+          <a class="btn btn-purple btn-full"
+             href="https://www.ticketmaster.com/he-is-legend-atlanta/event/0E00643ED3CCC308"
+             target="_blank">Buy Tickets</a>
+          <a class="btn btn-grey btn-full"
+             href="https://www.masqueradeatlanta.com/events/he-is-legend-5/">More Info</a>
+        </div>
+      </div>
+    </section>
+  </article>
+
+  <!-- Altar at The Masquerade — no Ticketmaster link yet -->
+  <article class="event" role="article">
+    <section class="eventDetails">
+      <div class="eventDetails__detail eventDetails__detail--startDate">
+        <div class="eventStartDate" content="May 15, 2026 7:00 pm" itemprop="startDate">
+          <span class="eventStartDate__day">Fri</span>
+          <span class="eventStartDate__date">15</span>
+          <span class="eventStartDate__month">May</span>
+          <span class="eventStartDate__year">2026</span>
+        </div>
+      </div>
+      <div class="eventDetails__detail eventDetails__detail--main">
+        <header class="eventHeader">
+          <a class="wrapperLink" href="https://www.masqueradeatlanta.com/events/altar-artist/">
+            <h2 class="eventHeader__title js-listTitle" itemprop="name">Altar Artist</h2>
+          </a>
+        </header>
+        <div class="event-location">
+          <p class="event__location-room"><span class="js-listVenue">Altar</span> at The Masquerade</p>
+          <div class="time-show">Doors 7:00 pm / 18+</div>
+        </div>
+      </div>
+      <div class="eventDetails__detail">
+        <div class="event-ticketInfo">
+          <a class="btn btn-grey btn-full"
+             href="https://www.masqueradeatlanta.com/events/altar-artist/">More Info</a>
+        </div>
+      </div>
+    </section>
+  </article>
+
+  <!-- Heaven at The Masquerade -->
+  <article class="event" role="article">
+    <section class="eventDetails">
+      <div class="eventDetails__detail eventDetails__detail--startDate">
+        <div class="eventStartDate" content="June 20, 2026 9:00 pm" itemprop="startDate">
+          <span class="eventStartDate__day">Sat</span>
+          <span class="eventStartDate__date">20</span>
+          <span class="eventStartDate__month">Jun</span>
+          <span class="eventStartDate__year">2026</span>
+        </div>
+      </div>
+      <div class="eventDetails__detail eventDetails__detail--main">
+        <header class="eventHeader">
+          <a class="wrapperLink" href="https://www.masqueradeatlanta.com/events/heaven-artist/">
+            <h2 class="eventHeader__title js-listTitle" itemprop="name">Heaven Artist</h2>
+          </a>
+        </header>
+        <div class="event-location">
+          <p class="event__location-room"><span class="js-listVenue">Heaven</span> at The Masquerade</p>
+          <div class="time-show">Doors 9:00 pm / 21+</div>
+        </div>
+      </div>
+      <div class="eventDetails__detail">
+        <div class="event-ticketInfo">
+          <a class="btn btn-purple btn-full"
+             href="https://www.ticketmaster.com/heaven-artist/event/HEAVEN001"
+             target="_blank">Buy Tickets</a>
+          <a class="btn btn-grey btn-full"
+             href="https://www.masqueradeatlanta.com/events/heaven-artist/">More Info</a>
+        </div>
+      </div>
+    </section>
+  </article>
+
+  <!-- Other venue (40 Watt Club) — must be excluded -->
+  <article class="event" role="article">
+    <section class="eventDetails">
+      <div class="eventDetails__detail eventDetails__detail--startDate">
+        <div class="eventStartDate" content="April 10, 2026 7:00 pm" itemprop="startDate">
+          <span class="eventStartDate__day">Fri</span>
+          <span class="eventStartDate__date">10</span>
+          <span class="eventStartDate__month">Apr</span>
+          <span class="eventStartDate__year">2026</span>
+        </div>
+      </div>
+      <div class="eventDetails__detail eventDetails__detail--main">
+        <header class="eventHeader">
+          <a class="wrapperLink" href="https://www.masqueradeatlanta.com/events/other-venue-show/">
+            <h2 class="eventHeader__title js-listTitle" itemprop="name">Other Venue Artist</h2>
+          </a>
+        </header>
+        <div class="event-location">
+          <p class="event__location-room"><span class="js-listVenue">Other Location</span>40 Watt Club</p>
+          <div class="time-show">Doors 7:00 pm / All Ages</div>
+        </div>
+      </div>
+      <div class="eventDetails__detail">
+        <div class="event-ticketInfo">
+          <a class="btn btn-purple btn-full" href="https://www.ticketmaster.com/other/ZZZZZ">Buy Tickets</a>
+        </div>
+      </div>
+    </section>
+  </article>
+
+</div>
+</body></html>
+"""
+
+
+# ─── Masquerade Atlanta Scraping ──────────────────────────────────────────────
+
+class TestMasqueradeScraping:
+    @pytest.mark.asyncio
+    async def test_extracts_masquerade_artists(self):
+        page = make_mock_page(MASQUERADE_HTML)
+        events = await scrape_masquerade(page)
+        artists = {e.artist for e in events}
+        assert {"He Is Legend", "Altar Artist", "Heaven Artist"} == artists
+
+    @pytest.mark.asyncio
+    async def test_excludes_other_venue_events(self):
+        page = make_mock_page(MASQUERADE_HTML)
+        events = await scrape_masquerade(page)
+        artists = {e.artist for e in events}
+        assert "Other Venue Artist" not in artists
+
+    @pytest.mark.asyncio
+    async def test_venue_name_is_full_location_string(self):
+        page = make_mock_page(MASQUERADE_HTML)
+        events = await scrape_masquerade(page)
+        event = next(e for e in events if e.artist == "He Is Legend")
+        assert event.venue == "Hell at The Masquerade"
+
+    @pytest.mark.asyncio
+    async def test_venue_names_for_all_rooms(self):
+        page = make_mock_page(MASQUERADE_HTML)
+        events = await scrape_masquerade(page)
+        venues = {e.venue for e in events}
+        assert "Hell at The Masquerade" in venues
+        assert "Altar at The Masquerade" in venues
+        assert "Heaven at The Masquerade" in venues
+
+    @pytest.mark.asyncio
+    async def test_date_parsed_from_content_attribute(self):
+        page = make_mock_page(MASQUERADE_HTML)
+        events = await scrape_masquerade(page)
+        event = next(e for e in events if e.artist == "He Is Legend")
+        assert event.date_parsed == "2026-04-08"
+
+    @pytest.mark.asyncio
+    async def test_date_text_strips_time_component(self):
+        page = make_mock_page(MASQUERADE_HTML)
+        events = await scrape_masquerade(page)
+        event = next(e for e in events if e.artist == "He Is Legend")
+        assert event.date_text == "April 8, 2026"
+        assert "6:00" not in event.date_text
+
+    @pytest.mark.asyncio
+    async def test_ticket_url_is_ticketmaster_link(self):
+        page = make_mock_page(MASQUERADE_HTML)
+        events = await scrape_masquerade(page)
+        event = next(e for e in events if e.artist == "He Is Legend")
+        assert event.ticket_url == "https://www.ticketmaster.com/he-is-legend-atlanta/event/0E00643ED3CCC308"
+
+    @pytest.mark.asyncio
+    async def test_ticket_url_none_when_not_on_sale(self):
+        page = make_mock_page(MASQUERADE_HTML)
+        events = await scrape_masquerade(page)
+        event = next(e for e in events if e.artist == "Altar Artist")
+        assert event.ticket_url is None
+
+    @pytest.mark.asyncio
+    async def test_detail_url_is_masquerade_event_page(self):
+        page = make_mock_page(MASQUERADE_HTML)
+        events = await scrape_masquerade(page)
+        event = next(e for e in events if e.artist == "He Is Legend")
+        assert event.detail_url == "https://www.masqueradeatlanta.com/events/he-is-legend-5/"
+
+    @pytest.mark.asyncio
+    async def test_show_time_extracted(self):
+        page = make_mock_page(MASQUERADE_HTML)
+        events = await scrape_masquerade(page)
+        event = next(e for e in events if e.artist == "He Is Legend")
+        assert event.show_time == "Doors 6:00 pm / All Ages"
+
+    @pytest.mark.asyncio
+    async def test_no_duplicate_hashes(self):
+        page = make_mock_page(MASQUERADE_HTML)
+        events = await scrape_masquerade(page)
+        hashes = [e.hash for e in events]
+        assert len(hashes) == len(set(hashes))
+
+    @pytest.mark.asyncio
+    async def test_event_count(self):
+        page = make_mock_page(MASQUERADE_HTML)
+        events = await scrape_masquerade(page)
+        assert len(events) == 3
 
 
 # ─── Center Stage Atlanta HTML Fixtures ──────────────────────────────────────

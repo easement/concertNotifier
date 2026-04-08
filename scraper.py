@@ -519,6 +519,81 @@ async def scrape_cobb_energy(page: Page) -> list[Event]:
     return await scrape_pac_venue(page, "https://www.cobbenergycentre.com/events", "Cobb Energy Centre", "https://www.cobbenergycentre.com")
 
 
+async def scrape_masquerade(page: Page) -> list[Event]:
+    """
+    The Masquerade Atlanta (masqueradeatlanta.com/events).
+    All upcoming shows are on one page. Only events whose location
+    contains "at The Masquerade" are included; events promoted by
+    Masquerade but held at other venues (e.g. 40 Watt Club, Aisle 5)
+    are excluded. The venue name is the full location string, e.g.
+    "Hell at The Masquerade", "Heaven at The Masquerade", etc.
+    """
+    html = await get_page_html(
+        page,
+        "https://www.masqueradeatlanta.com/events/",
+        wait_selector="article.event",
+        scroll=True,
+    )
+    soup = BeautifulSoup(html, "html.parser")
+    events = []
+    seen_hashes = set()
+
+    for card in soup.select("article.event"):
+        # Filter: only shows at The Masquerade venues
+        location_el = card.select_one("p.event__location-room")
+        if not location_el:
+            continue
+        location_text = location_el.get_text(separator=" ", strip=True)
+        if "at The Masquerade" not in location_text:
+            continue
+
+        # Artist
+        title_el = card.select_one("h2.eventHeader__title")
+        if not title_el:
+            continue
+        artist = title_el.get_text(strip=True)
+        if not artist:
+            continue
+
+        # Date — content attr is "Month D, YYYY H:MM am/pm"; strip the time part
+        date_el = card.select_one("div.eventStartDate")
+        date_text = ""
+        date_parsed = None
+        if date_el:
+            content = date_el.get("content", "")
+            if content:
+                date_text = re.sub(r"\s+\d+:\d+\s*(am|pm)?$", "", content, flags=re.I).strip()
+                date_parsed = try_parse_date(date_text)
+
+        show_time_el = card.select_one(".time-show")
+        show_time = show_time_el.get_text(strip=True) if show_time_el else None
+
+        ticket_el = card.select_one("a.btn-purple[href]")
+        ticket_url = ticket_el["href"] if ticket_el else None
+
+        detail_el = card.select_one("a.btn-grey[href]")
+        if not detail_el:
+            detail_el = card.select_one("a.wrapperLink[href]")
+        detail_url = detail_el["href"] if detail_el else None
+
+        event = Event(
+            venue=location_text,
+            artist=artist,
+            date_text=date_text,
+            date_parsed=date_parsed,
+            doors=None,
+            show_time=show_time,
+            price=None,
+            ticket_url=ticket_url,
+            detail_url=detail_url,
+        )
+        if event.hash not in seen_hashes:
+            events.append(event)
+            seen_hashes.add(event.hash)
+
+    return events
+
+
 async def scrape_centerstage_atlanta_venue(page: Page, venue_tab: str, venue_name: str) -> list[Event]:
     """
     Center Stage Atlanta (centerstage-atlanta.com) — three venues on one site:
@@ -888,6 +963,15 @@ async def run_scraper():
         print("Scraping Cobb Energy Centre...")
         try:
             events = await scrape_cobb_energy(page)
+            print(f"  Found {len(events)} events")
+            all_events.extend(events)
+        except Exception as e:
+            print(f"  ERROR: {e}")
+
+        # The Masquerade Atlanta
+        print("Scraping The Masquerade...")
+        try:
+            events = await scrape_masquerade(page)
             print(f"  Found {len(events)} events")
             all_events.extend(events)
         except Exception as e:

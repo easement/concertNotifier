@@ -10,6 +10,7 @@ from scraper import (
     scrape_aisle5,
     scrape_fox_theatre,
     scrape_cobb_energy,
+    scrape_masquerade,
     scrape_center_stage,
     scrape_the_loft,
     scrape_vinyl,
@@ -74,6 +75,7 @@ async def test_all_venues():
     tasks.append(("Aisle 5", "https://aisle5atl.com/calendar", test_venue_scraper(scrape_aisle5)))
     tasks.append(("Fox Theatre", "https://www.foxtheatre.org/events", test_venue_scraper(scrape_fox_theatre)))
     tasks.append(("Cobb Energy Centre", "https://www.cobbenergycentre.com/events", test_venue_scraper(scrape_cobb_energy)))
+    tasks.append(("The Masquerade", "https://www.masqueradeatlanta.com/events/", test_venue_scraper(scrape_masquerade)))
     tasks.append(("Center Stage", "https://www.centerstage-atlanta.com/", test_venue_scraper(scrape_center_stage)))
     tasks.append(("The Loft", "https://www.centerstage-atlanta.com/", test_venue_scraper(scrape_the_loft)))
     tasks.append(("Vinyl", "https://www.centerstage-atlanta.com/", test_venue_scraper(scrape_vinyl)))
