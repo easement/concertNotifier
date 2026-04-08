@@ -11,15 +11,17 @@ from scraper import (
     scrape_the_earl,
     scrape_goat_farm,
     scrape_aisle5,
+    scrape_fox_theatre,
+    scrape_cobb_energy,
     try_parse_date,
     Event,
     VENUES
 )
 
 
-@pytest_asyncio.fixture(scope="session")
+@pytest_asyncio.fixture
 async def browser_context():
-    """Create a browser context for all tests."""
+    """Create a browser page for a single test."""
     async with async_playwright() as p:
         browser = await p.chromium.launch(headless=True)
         context = await browser.new_context(
@@ -96,6 +98,20 @@ class TestDateParsing:
         assert try_parse_date("Apr 8, 2026") == "2026-04-08"
         assert try_parse_date("April 8, 2026") == "2026-04-08"
         assert try_parse_date("04/08/2026") == "2026-04-08"
+
+    def test_parse_pac_venue_formats(self):
+        """Test parsing date formats from the Paciolan platform (Cobb/Fox)."""
+        # Single date with weekday and dot-abbreviated month: "Thursday Apr. 9 / 2026"
+        assert try_parse_date("Thursday Apr. 9 / 2026") == "2026-04-09"
+        # Single date without weekday: "Apr. 25 / 2026"
+        assert try_parse_date("Apr. 25 / 2026") == "2026-04-25"
+        # Full month name with weekday: "Saturday June 20 / 2026"
+        assert try_parse_date("Saturday June 20 / 2026") == "2026-06-20"
+        assert try_parse_date("Friday July 17 / 2026") == "2026-07-17"
+        # Fox-style with comma separator: "Apr 18 , 2026"
+        assert try_parse_date("Apr 18 , 2026") == "2026-04-18"
+        # Range date (first date only, year from last): "Apr 7 , 2026"
+        assert try_parse_date("Apr 7 , 2026") == "2026-04-07"
 
     def test_parse_with_ordinals(self):
         """Test parsing dates with ordinal suffixes."""
@@ -241,6 +257,68 @@ class TestAisle5:
             assert event.venue == "Aisle 5"
             assert event.artist
             assert len(event.artist) >= 3
+
+
+class TestFoxTheatre:
+    """Test Fox Theatre scraper."""
+
+    @pytest.mark.asyncio
+    async def test_fox_theatre(self, browser_context):
+        events = await scrape_fox_theatre(browser_context)
+        assert isinstance(events, list)
+        assert len(events) > 0, "Should find at least one event"
+
+        for event in events:
+            assert isinstance(event, Event)
+            assert event.venue == "Fox Theatre"
+            assert event.artist, "Artist name should not be empty"
+            assert len(event.artist) >= 3
+            assert event.hash
+
+    @pytest.mark.asyncio
+    async def test_fox_theatre_dates_parsed(self, browser_context):
+        """Most Fox events should have parseable dates."""
+        events = await scrape_fox_theatre(browser_context)
+        assert len(events) > 0
+        parsed = [e for e in events if e.date_parsed]
+        assert len(parsed) > 0, "At least some events should have parsed dates"
+
+    @pytest.mark.asyncio
+    async def test_fox_theatre_no_duplicates(self, browser_context):
+        events = await scrape_fox_theatre(browser_context)
+        hashes = [e.hash for e in events]
+        assert len(hashes) == len(set(hashes)), "Fox Theatre returned duplicate events"
+
+
+class TestCobbEnergy:
+    """Test Cobb Energy Centre scraper."""
+
+    @pytest.mark.asyncio
+    async def test_cobb_energy(self, browser_context):
+        events = await scrape_cobb_energy(browser_context)
+        assert isinstance(events, list)
+        assert len(events) > 0, "Should find at least one event"
+
+        for event in events:
+            assert isinstance(event, Event)
+            assert event.venue == "Cobb Energy Centre"
+            assert event.artist, "Artist name should not be empty"
+            assert len(event.artist) >= 3
+            assert event.hash
+
+    @pytest.mark.asyncio
+    async def test_cobb_energy_dates_parsed(self, browser_context):
+        """Most Cobb events should have parseable dates."""
+        events = await scrape_cobb_energy(browser_context)
+        assert len(events) > 0
+        parsed = [e for e in events if e.date_parsed]
+        assert len(parsed) > 0, "At least some events should have parsed dates"
+
+    @pytest.mark.asyncio
+    async def test_cobb_energy_no_duplicates(self, browser_context):
+        events = await scrape_cobb_energy(browser_context)
+        hashes = [e.hash for e in events]
+        assert len(hashes) == len(set(hashes)), "Cobb Energy Centre returned duplicate events"
 
 
 class TestDeduplication:
