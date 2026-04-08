@@ -519,6 +519,112 @@ async def scrape_cobb_energy(page: Page) -> list[Event]:
     return await scrape_pac_venue(page, "https://www.cobbenergycentre.com/events", "Cobb Energy Centre", "https://www.cobbenergycentre.com")
 
 
+async def scrape_centerstage_atlanta_venue(page: Page, venue_tab: str, venue_name: str) -> list[Event]:
+    """
+    Center Stage Atlanta (centerstage-atlanta.com) — three venues on one site:
+    Center Stage, The Loft, Vinyl.
+    Events are JS-rendered; filter by clicking the venue tab, then lazy-load all events.
+    Tab labels on the site are uppercase (e.g. "CENTER STAGE", "THE LOFT", "VINYL").
+    """
+    url = "https://www.centerstage-atlanta.com/"
+
+    print(f"  → Navigating to {url}...")
+    await page.goto(url, wait_until="networkidle", timeout=30000)
+    await page.wait_for_timeout(2000)
+
+    # Click the venue filter tab — labels on site are uppercase
+    tab_pattern = re.compile(r"^\s*" + re.escape(venue_tab.upper()) + r"\s*$", re.I)
+    tab = page.locator("a[href='#']").filter(has_text=tab_pattern)
+    if await tab.count() > 0 and await tab.first.is_visible():
+        print(f"  → Clicking '{venue_tab.upper()}' tab...")
+        await tab.first.click()
+        await page.wait_for_timeout(2000)
+    else:
+        print(f"  → Tab '{venue_tab.upper()}' not found, proceeding...")
+
+    # Click "View More Shows" until it disappears
+    print(f"  → Loading all events...")
+    for _ in range(30):
+        btn = page.locator("a.csa-button").filter(has_text=re.compile(r"view more shows", re.I))
+        if await btn.count() == 0 or not await btn.first.is_visible():
+            break
+        await btn.first.click()
+        await page.wait_for_timeout(2000)
+
+    html = await page.content()
+    soup = BeautifulSoup(html, "html.parser")
+    events = []
+    seen_hashes = set()
+
+    # Remove the featured carousel to avoid duplicates — listing items are canonical
+    carousel = soup.select_one(".csa-events-carousel")
+    if carousel:
+        carousel.decompose()
+
+    for card in soup.select(".event-item"):
+        name_el = card.select_one("h3.event-name")
+        if not name_el:
+            continue
+        artist = name_el.get_text(strip=True)
+        if not artist or len(artist) < 2:
+            continue
+
+        # data-show-date is YYYYMMDD — most reliable date source
+        date_raw = card.get("data-show-date", "")
+        if date_raw and len(date_raw) == 8:
+            date_parsed = f"{date_raw[:4]}-{date_raw[4:6]}-{date_raw[6:]}"
+            date_el = card.select_one("span.event-date")
+            date_text = date_el.get_text(strip=True) if date_el else date_raw
+        else:
+            date_el = card.select_one("span.event-date")
+            date_text = date_el.get_text(strip=True) if date_el else ""
+            date_parsed = try_parse_date(date_text)
+
+        show_el = card.select_one(".event-show_time")
+        show_time = show_el.get_text(strip=True) if show_el else None
+
+        # Prefer Ticketmaster link as ticket_url; fall back to first event-button
+        ticket_el = card.select_one("a.event-button[href*='ticketmaster']")
+        if not ticket_el:
+            ticket_el = card.select_one("a.event-button[href]")
+        ticket_url = ticket_el["href"] if ticket_el else None
+
+        # Detail URL: centerstage-atlanta.com event page (event-link anchor)
+        detail_el = card.select_one("a.event-link[href]")
+        if not detail_el:
+            detail_el = card.select_one("a.event-button[href*='centerstage-atlanta']")
+        detail_url = detail_el["href"] if detail_el else None
+
+        event = Event(
+            venue=venue_name,
+            artist=artist,
+            date_text=date_text,
+            date_parsed=date_parsed,
+            doors=None,
+            show_time=show_time,
+            price=None,
+            ticket_url=ticket_url,
+            detail_url=detail_url,
+        )
+        if event.hash not in seen_hashes:
+            events.append(event)
+            seen_hashes.add(event.hash)
+
+    return events
+
+
+async def scrape_center_stage(page: Page) -> list[Event]:
+    return await scrape_centerstage_atlanta_venue(page, "Center Stage", "Center Stage")
+
+
+async def scrape_the_loft(page: Page) -> list[Event]:
+    return await scrape_centerstage_atlanta_venue(page, "The Loft", "The Loft")
+
+
+async def scrape_vinyl(page: Page) -> list[Event]:
+    return await scrape_centerstage_atlanta_venue(page, "Vinyl", "Vinyl")
+
+
 # ─── Helpers ──────────────────────────────────────────────────────────────────
 
 def try_parse_date(text: str) -> Optional[str]:
@@ -786,6 +892,20 @@ async def run_scraper():
             all_events.extend(events)
         except Exception as e:
             print(f"  ERROR: {e}")
+
+        # Center Stage Atlanta venues (Center Stage, The Loft, Vinyl)
+        for scraper_fn, name in [
+            (scrape_center_stage, "Center Stage"),
+            (scrape_the_loft, "The Loft"),
+            (scrape_vinyl, "Vinyl"),
+        ]:
+            print(f"Scraping {name}...")
+            try:
+                events = await scraper_fn(page)
+                print(f"  Found {len(events)} events")
+                all_events.extend(events)
+            except Exception as e:
+                print(f"  ERROR: {e}")
 
         await browser.close()
 

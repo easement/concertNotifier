@@ -18,6 +18,10 @@ from scraper import (
     scrape_the_earl,
     scrape_goat_farm,
     scrape_pac_venue,
+    scrape_centerstage_atlanta_venue,
+    scrape_center_stage,
+    scrape_the_loft,
+    scrape_vinyl,
 )
 
 
@@ -617,6 +621,277 @@ class TestEarlScraping:
         event = next(e for e in events if e.artist == "Cool Band")
         assert event.detail_url is not None
         assert "badearl.com/show/" in event.detail_url
+
+
+# ─── Center Stage Atlanta HTML Fixtures ──────────────────────────────────────
+
+# A minimal listing section with two events at different venues, plus a
+# carousel section that should be stripped before parsing.
+CSA_LISTING_HTML = """
+<html><body>
+
+<!-- Carousel section — must be ignored by scraper -->
+<div class="csa-events-carousel">
+  <div class="csa-events-carousel-slide event-item room-center_stage slick-cloned"
+       data-show-date="20260410">
+    <div class="event-action" data-permalink="https://www.centerstage-atlanta.com/events/carousel-dupe/" data-venue="center_stage">
+      <div class="event-item-content featured-event">
+        <h4 class="event-venue">Center Stage</h4>
+        <span class="event-date">Fri Apr 10</span>
+        <h3 class="event-name">Carousel Dupe Artist</h3>
+        <div class="event-button-wrap">
+          <a class="button event-button csa-button" href="https://www.ticketmaster.com/event/CAROUSEL" target="_blank">Buy Tickets</a>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Upcoming shows listing -->
+<div class="events-listing__inner">
+
+  <div class="event-item room-center_stage popup-event" data-show-date="20260410">
+    <a class="event-link" href="https://www.centerstage-atlanta.com/events/whitney-cummings/"></a>
+    <div class="event-action" data-permalink="https://www.centerstage-atlanta.com/events/whitney-cummings/" data-venue="center_stage">
+      <div class="event-item-content">
+        <h4 class="event-venue">Center Stage</h4>
+        <span class="event-date">Fri Apr 10</span>
+        <h3 class="event-name">Whitney Cummings</h3>
+        <div class="event-show_time">Doors 7:00 pm / Show 8:00 pm</div>
+        <div class="event-button-wrap">
+          <a class="button event-button csa-button" href="https://www.ticketmaster.com/event/0E006373AE78990C" target="_blank">Buy Tickets</a>
+        </div>
+        <div class="event-button-wrap">
+          <a class="button event-button csa-button" href="https://www.centerstage-atlanta.com/events/whitney-cummings/" target="_blank">More Info</a>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="event-item room-the_loft popup-event" data-show-date="20260417">
+    <a class="event-link" href="https://www.centerstage-atlanta.com/events/chris-grey/"></a>
+    <div class="event-action" data-permalink="https://www.centerstage-atlanta.com/events/chris-grey/" data-venue="the_loft">
+      <div class="event-item-content">
+        <h4 class="event-venue">The Loft</h4>
+        <span class="event-date">Thu Apr 17</span>
+        <h3 class="event-name">Chris Grey</h3>
+        <div class="event-show_time">Doors 8:00 pm / Show 9:00 pm</div>
+        <div class="event-button-wrap">
+          <a class="button event-button csa-button" href="https://www.ticketmaster.com/event/0E00638CC947BFFC" target="_blank">Buy Tickets</a>
+        </div>
+        <div class="event-button-wrap">
+          <a class="button event-button csa-button" href="https://www.centerstage-atlanta.com/events/chris-grey/" target="_blank">More Info</a>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="event-item room-vinyl popup-event" data-show-date="20260418">
+    <a class="event-link" href="https://www.centerstage-atlanta.com/events/vinyl-artist/"></a>
+    <div class="event-action" data-permalink="https://www.centerstage-atlanta.com/events/vinyl-artist/" data-venue="vinyl">
+      <div class="event-item-content">
+        <h4 class="event-venue">Vinyl</h4>
+        <span class="event-date">Fri Apr 18</span>
+        <h3 class="event-name">Vinyl Artist</h3>
+        <div class="event-show_time">Doors 6:00 pm / Show 7:00 pm</div>
+        <div class="event-button-wrap">
+          <a class="button event-button csa-button" href="https://www.ticketmaster.com/event/VINYL123" target="_blank">Buy Tickets</a>
+        </div>
+        <div class="event-button-wrap">
+          <a class="button event-button csa-button" href="https://www.centerstage-atlanta.com/events/vinyl-artist/" target="_blank">More Info</a>
+        </div>
+      </div>
+    </div>
+  </div>
+
+</div>
+</body></html>
+"""
+
+# Event with no Ticketmaster link yet (ticket_url falls back to first event-button href)
+CSA_NO_TICKET_HTML = """
+<html><body>
+<div class="events-listing__inner">
+  <div class="event-item room-vinyl popup-event" data-show-date="20260601">
+    <a class="event-link" href="https://www.centerstage-atlanta.com/events/no-ticket-artist/"></a>
+    <div class="event-action" data-permalink="https://www.centerstage-atlanta.com/events/no-ticket-artist/" data-venue="vinyl">
+      <div class="event-item-content">
+        <h4 class="event-venue">Vinyl</h4>
+        <span class="event-date">Mon Jun 01</span>
+        <h3 class="event-name">No Ticket Yet Artist</h3>
+        <div class="event-button-wrap">
+          <a class="button event-button csa-button" href="https://www.centerstage-atlanta.com/events/no-ticket-artist/" target="_blank">More Info</a>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+</body></html>
+"""
+
+
+def make_centerstage_mock_page(html: str, tab_found: bool = True):
+    """
+    Mock Playwright page for Center Stage Atlanta scrapers.
+    Handles the locator chaining used by scrape_centerstage_atlanta_venue:
+      page.locator("a[href='#']").filter(...) → tab locator
+      page.locator("a.csa-button").filter(...)  → "View More" locator (count=0 → skip loop)
+    """
+    page = AsyncMock()
+    page.goto = AsyncMock()
+    page.content = AsyncMock(return_value=html)
+    page.wait_for_timeout = AsyncMock()
+
+    # Tab locator: clicking the venue filter tab
+    tab_locator = AsyncMock()
+    tab_locator.count = AsyncMock(return_value=1 if tab_found else 0)
+    tab_locator.first = AsyncMock()
+    tab_locator.first.is_visible = AsyncMock(return_value=tab_found)
+    tab_locator.first.click = AsyncMock()
+
+    base_locator = MagicMock()
+    base_locator.filter = MagicMock(return_value=tab_locator)
+
+    # "View More Shows" locator: count=0 skips the lazy-load loop
+    more_locator = AsyncMock()
+    more_locator.count = AsyncMock(return_value=0)
+    more_locator.first = AsyncMock()
+    more_locator.first.is_visible = AsyncMock(return_value=False)
+
+    csa_button_locator = MagicMock()
+    csa_button_locator.filter = MagicMock(return_value=more_locator)
+
+    def locator_side_effect(selector):
+        if "csa-button" in selector:
+            return csa_button_locator
+        return base_locator
+
+    page.locator = MagicMock(side_effect=locator_side_effect)
+    return page
+
+
+# ─── Center Stage Atlanta Scraping ────────────────────────────────────────────
+
+class TestCenterStageAtlantaScraping:
+    @pytest.mark.asyncio
+    async def test_extracts_artist_from_h3_event_name(self):
+        page = make_centerstage_mock_page(CSA_LISTING_HTML)
+        events = await scrape_centerstage_atlanta_venue(page, "Center Stage", "Center Stage")
+        artists = {e.artist for e in events}
+        assert "Whitney Cummings" in artists
+
+    @pytest.mark.asyncio
+    async def test_venue_name_set_on_all_events(self):
+        page = make_centerstage_mock_page(CSA_LISTING_HTML)
+        events = await scrape_centerstage_atlanta_venue(page, "Center Stage", "Center Stage")
+        assert all(e.venue == "Center Stage" for e in events)
+
+    @pytest.mark.asyncio
+    async def test_date_parsed_from_data_show_date(self):
+        page = make_centerstage_mock_page(CSA_LISTING_HTML)
+        events = await scrape_centerstage_atlanta_venue(page, "Center Stage", "Center Stage")
+        event = next(e for e in events if e.artist == "Whitney Cummings")
+        assert event.date_parsed == "2026-04-10"
+
+    @pytest.mark.asyncio
+    async def test_date_text_from_span_event_date(self):
+        page = make_centerstage_mock_page(CSA_LISTING_HTML)
+        events = await scrape_centerstage_atlanta_venue(page, "Center Stage", "Center Stage")
+        event = next(e for e in events if e.artist == "Whitney Cummings")
+        assert "Apr 10" in event.date_text
+
+    @pytest.mark.asyncio
+    async def test_ticket_url_is_ticketmaster_link(self):
+        page = make_centerstage_mock_page(CSA_LISTING_HTML)
+        events = await scrape_centerstage_atlanta_venue(page, "Center Stage", "Center Stage")
+        event = next(e for e in events if e.artist == "Whitney Cummings")
+        assert event.ticket_url == "https://www.ticketmaster.com/event/0E006373AE78990C"
+
+    @pytest.mark.asyncio
+    async def test_detail_url_is_venue_event_page(self):
+        page = make_centerstage_mock_page(CSA_LISTING_HTML)
+        events = await scrape_centerstage_atlanta_venue(page, "Center Stage", "Center Stage")
+        event = next(e for e in events if e.artist == "Whitney Cummings")
+        assert event.detail_url == "https://www.centerstage-atlanta.com/events/whitney-cummings/"
+
+    @pytest.mark.asyncio
+    async def test_show_time_extracted(self):
+        page = make_centerstage_mock_page(CSA_LISTING_HTML)
+        events = await scrape_centerstage_atlanta_venue(page, "Center Stage", "Center Stage")
+        event = next(e for e in events if e.artist == "Whitney Cummings")
+        assert event.show_time == "Doors 7:00 pm / Show 8:00 pm"
+
+    @pytest.mark.asyncio
+    async def test_carousel_items_not_included(self):
+        page = make_centerstage_mock_page(CSA_LISTING_HTML)
+        events = await scrape_centerstage_atlanta_venue(page, "Center Stage", "Center Stage")
+        artists = {e.artist for e in events}
+        assert "Carousel Dupe Artist" not in artists
+
+    @pytest.mark.asyncio
+    async def test_all_three_venue_events_present_when_tab_not_filtered(self):
+        """With no tab filtering applied (all events visible), all venues appear."""
+        page = make_centerstage_mock_page(CSA_LISTING_HTML)
+        events = await scrape_centerstage_atlanta_venue(page, "Center Stage", "Center Stage")
+        # The mock returns all HTML unchanged (no real tab filtering in unit test)
+        artists = {e.artist for e in events}
+        assert "Whitney Cummings" in artists
+        assert "Chris Grey" in artists
+        assert "Vinyl Artist" in artists
+
+    @pytest.mark.asyncio
+    async def test_no_duplicate_hashes(self):
+        page = make_centerstage_mock_page(CSA_LISTING_HTML)
+        events = await scrape_centerstage_atlanta_venue(page, "Center Stage", "Center Stage")
+        hashes = [e.hash for e in events]
+        assert len(hashes) == len(set(hashes))
+
+    @pytest.mark.asyncio
+    async def test_no_ticket_url_falls_back_to_detail_link(self):
+        """When there's no Ticketmaster link, ticket_url falls back to the first event-button."""
+        page = make_centerstage_mock_page(CSA_NO_TICKET_HTML)
+        events = await scrape_centerstage_atlanta_venue(page, "Vinyl", "Vinyl")
+        assert len(events) == 1
+        event = events[0]
+        assert event.artist == "No Ticket Yet Artist"
+        # No ticketmaster link — falls back to the centerstage More Info button
+        assert event.ticket_url == "https://www.centerstage-atlanta.com/events/no-ticket-artist/"
+
+    @pytest.mark.asyncio
+    async def test_tab_click_attempted(self):
+        """Verifies the scraper tries to click the venue filter tab."""
+        page = make_centerstage_mock_page(CSA_LISTING_HTML, tab_found=True)
+        await scrape_centerstage_atlanta_venue(page, "Center Stage", "Center Stage")
+        # filter() returns our tab_locator; .first.click should have been called
+        tab_locator = page.locator("a[href='#']").filter()
+        tab_locator.first.click.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_proceeds_gracefully_when_tab_not_found(self):
+        """Scraper should still return events even if the tab can't be clicked."""
+        page = make_centerstage_mock_page(CSA_LISTING_HTML, tab_found=False)
+        events = await scrape_centerstage_atlanta_venue(page, "Center Stage", "Center Stage")
+        assert len(events) > 0
+
+
+class TestCenterStageWrappers:
+    @pytest.mark.asyncio
+    async def test_scrape_center_stage_venue_name(self):
+        page = make_centerstage_mock_page(CSA_LISTING_HTML)
+        events = await scrape_center_stage(page)
+        assert all(e.venue == "Center Stage" for e in events)
+
+    @pytest.mark.asyncio
+    async def test_scrape_the_loft_venue_name(self):
+        page = make_centerstage_mock_page(CSA_LISTING_HTML)
+        events = await scrape_the_loft(page)
+        assert all(e.venue == "The Loft" for e in events)
+
+    @pytest.mark.asyncio
+    async def test_scrape_vinyl_venue_name(self):
+        page = make_centerstage_mock_page(CSA_LISTING_HTML)
+        events = await scrape_vinyl(page)
+        assert all(e.venue == "Vinyl" for e in events)
 
 
 if __name__ == "__main__":
