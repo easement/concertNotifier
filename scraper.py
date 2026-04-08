@@ -530,6 +530,13 @@ def try_parse_date(text: str) -> Optional[str]:
     if re.match(r'\d{4}-\d{2}-\d{2}', text):
         return text[:10]
 
+    # Try MM/DD/YYYY before cleaning (cleaning strips slashes)
+    if re.match(r'\d{1,2}/\d{1,2}/\d{4}$', text.strip()):
+        try:
+            return datetime.strptime(text.strip(), "%m/%d/%Y").strftime("%Y-%m-%d")
+        except ValueError:
+            pass
+
     # Try common formats
     formats = [
         "%A, %b. %d, %Y",     # Wednesday, Apr. 8, 2026
