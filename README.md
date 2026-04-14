@@ -1,6 +1,6 @@
 # Atlanta Concert Scraper
 
-Scrapes 7 Atlanta venues for new concert listings and tracks what's been added since your last run. Features intelligent deduplication, clean artist name extraction, and detailed progress output.
+Scrapes Atlanta venues for new concert listings and tracks what's been added since your last run. Features intelligent deduplication, clean artist name extraction, and detailed progress output.
 
 ## Venues
 - **The Eastern** - 30+ events
@@ -10,6 +10,12 @@ Scrapes 7 Atlanta venues for new concert listings and tracks what's been added s
 - **The Earl** - Variable
 - **The Goat Farm** - 120+ events (arts & music)
 - **Aisle 5** - 130+ events
+- **Fox Theatre**
+- **Cobb Energy Centre**
+- **The Masquerade** (Heaven, Hell, Purgatory)
+- **Center Stage Atlanta** (Center Stage, The Loft, Vinyl)
+- **City Winery Atlanta**
+- **Helium Comedy Club Atlanta** (Special Events only)
 
 ## Features
 - ✅ **Smart Deduplication** - Filters out duplicate events using hash-based tracking
@@ -113,7 +119,7 @@ pytest test_scraper.py -v
 **Test Coverage:**
 - Event model and hash generation
 - Date parsing (multiple formats)
-- All 7 venue scrapers
+- All venue scrapers
 - Deduplication validation
 - Artist name extraction
 - Invalid entry filtering

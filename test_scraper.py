@@ -14,6 +14,7 @@ from scraper import (
     scrape_fox_theatre,
     scrape_cobb_energy,
     scrape_city_winery,
+    scrape_helium_comedy_atlanta,
     try_parse_date,
     Event,
     VENUES
@@ -400,6 +401,58 @@ class TestCityWinery:
     async def test_city_winery_show_times(self, city_winery_events):
         with_times = [e for e in city_winery_events if e.show_time]
         assert len(with_times) > 0, "At least some events should have show times"
+
+
+@pytest_asyncio.fixture(scope="module")
+async def helium_comedy_events():
+    """Scrape Helium Comedy Club Atlanta once and share the result across all tests in the module."""
+    async with async_playwright() as p:
+        browser = await p.chromium.launch(headless=True)
+        context = await browser.new_context(
+            user_agent="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+                       "AppleWebKit/537.36 (KHTML, like Gecko) "
+                       "Chrome/120.0.0.0 Safari/537.36"
+        )
+        page = await context.new_page()
+        events = await scrape_helium_comedy_atlanta(page)
+        await browser.close()
+    return events
+
+
+class TestHeliumComedyAtlanta:
+    """Integration tests for Helium Comedy Club Atlanta scraper (Special Events only)."""
+
+    @pytest.mark.asyncio
+    async def test_returns_list(self, helium_comedy_events):
+        assert isinstance(helium_comedy_events, list)
+
+    @pytest.mark.asyncio
+    async def test_event_structure(self, helium_comedy_events):
+        for event in helium_comedy_events:
+            assert isinstance(event, Event)
+            assert event.venue == "Helium Comedy Club Atlanta"
+            assert event.artist, "Artist name should not be empty"
+            assert len(event.artist) >= 2
+            assert event.hash
+
+    @pytest.mark.asyncio
+    async def test_dates_parsed_when_present(self, helium_comedy_events):
+        parsed = [e for e in helium_comedy_events if e.date_parsed]
+        for event in parsed:
+            assert event.date_parsed[:4].isdigit(), "date_parsed should start with a 4-digit year"
+
+    @pytest.mark.asyncio
+    async def test_no_duplicates(self, helium_comedy_events):
+        hashes = [e.hash for e in helium_comedy_events]
+        assert len(hashes) == len(set(hashes)), "Helium Comedy returned duplicate events"
+
+    @pytest.mark.asyncio
+    async def test_ticket_urls_are_absolute(self, helium_comedy_events):
+        for event in helium_comedy_events:
+            if event.ticket_url:
+                assert event.ticket_url.startswith("http"), (
+                    f"ticket_url should be absolute: {event.ticket_url}"
+                )
 
 
 if __name__ == "__main__":

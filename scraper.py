@@ -762,6 +762,115 @@ async def scrape_city_winery(page: Page) -> list[Event]:
     return events
 
 
+async def scrape_helium_comedy_atlanta(page: Page) -> list[Event]:
+    """
+    Helium Comedy Club Atlanta (atlanta.heliumcomedy.com/events).
+    Only returns events tagged with the Special Events badge:
+      https://helium-comedy.s3.amazonaws.com/MISC/HEL_SpecialEvents_Badge_60x60px.png
+    Handles lazy loading and/or a 'Load More' button.
+    """
+    BADGE_SRC = "HEL_SpecialEvents_Badge_60x60px.png"
+    BASE_URL = "https://atlanta.heliumcomedy.com"
+
+    html = await get_page_html(
+        page,
+        f"{BASE_URL}/events",
+        wait_selector=".eventlist-event, .event-listing, article, .sqs-block-content",
+        scroll=True,
+        load_more_selector="a.load-more-btn, button.load-more, .load-more-link, [data-load-more]",
+    )
+    soup = BeautifulSoup(html, "html.parser")
+    events = []
+    seen_hashes = set()
+
+    for badge_img in soup.find_all("img", src=lambda s: s and BADGE_SRC in s):
+        # Walk up the DOM to find the nearest event container.
+        # Prefer <article> (Squarespace eventlist pattern); fall back to a div
+        # whose class explicitly marks it as a top-level event card.
+        card = None
+        tmp = badge_img.parent
+        for _ in range(15):
+            if tmp is None or tmp.name in ("body", "html", "[document]"):
+                break
+            if tmp.name == "article":
+                card = tmp
+                break
+            classes = " ".join(tmp.get("class", []))
+            # Accept divs that are named as the card itself (e.g. "event-card",
+            # "eventlist-event"), but not sub-components ("eventlist-description").
+            if card is None and any(
+                cls in classes.lower() for cls in ("event-card", "eventlist-event", "event-item", "show-card")
+            ):
+                card = tmp
+                break
+            tmp = tmp.parent
+
+        if card is None:
+            continue
+
+        # Extract artist/event title
+        title_el = card.select_one(
+            "h1, h2, h3, h4, .eventlist-title, .event-title, [class*='title']"
+        )
+        if not title_el:
+            continue
+        artist = title_el.get_text(strip=True)
+        if not artist or len(artist) < 2:
+            continue
+
+        # Extract date — prefer <time datetime="..."> for reliability
+        date_text = ""
+        show_time = None
+        time_el = card.select_one("time[datetime], .eventlist-datetag-startdate, .event-date")
+        if time_el:
+            dt_attr = time_el.get("datetime", "")
+            if dt_attr:
+                # ISO datetime like "2026-06-15T19:00:00" → split date and time
+                date_text = dt_attr[:10] if len(dt_attr) >= 10 else dt_attr
+                if "T" in dt_attr:
+                    try:
+                        dt_obj = datetime.fromisoformat(dt_attr.split("+")[0].split("Z")[0])
+                        show_time = dt_obj.strftime("%-I:%M %p").lower()
+                    except ValueError:
+                        pass
+            else:
+                date_text = time_el.get_text(strip=True)
+        else:
+            date_el = card.select_one(".eventlist-meta-date, [class*='date'], .event-starttime")
+            date_text = date_el.get_text(strip=True) if date_el else ""
+
+        # Split time component if embedded in text ("Mon, Jun 15 @ 7:00 pm")
+        if "@" in date_text and show_time is None:
+            parts = date_text.split("@", 1)
+            date_text = parts[0].strip()
+            show_time = parts[1].strip()
+
+        date_parsed = try_parse_date(date_text)
+
+        # Extract ticket / detail URL (prefer outer <a> wrapping the card)
+        link_el = card.select_one("a[href]")
+        ticket_url = link_el.get("href") if link_el else None
+        if ticket_url and not ticket_url.startswith("http"):
+            ticket_url = f"{BASE_URL}{ticket_url}"
+
+        event = Event(
+            venue="Helium Comedy Club Atlanta",
+            artist=artist,
+            date_text=date_text,
+            date_parsed=date_parsed,
+            doors=None,
+            show_time=show_time,
+            price=None,
+            ticket_url=ticket_url,
+            detail_url=ticket_url,
+        )
+        if event.hash not in seen_hashes:
+            events.append(event)
+            seen_hashes.add(event.hash)
+
+    return events
+
+
 def _parse_city_winery_date(date_text: str) -> Optional[str]:
     """
     Parse City Winery date strings like 'Tue, Apr 14' (no year).
@@ -1086,6 +1195,15 @@ async def run_scraper():
         print("Scraping City Winery Atlanta...")
         try:
             events = await scrape_city_winery(page)
+            print(f"  Found {len(events)} events")
+            all_events.extend(events)
+        except Exception as e:
+            print(f"  ERROR: {e}")
+
+        # Helium Comedy Club Atlanta (Special Events only)
+        print("Scraping Helium Comedy Club Atlanta...")
+        try:
+            events = await scrape_helium_comedy_atlanta(page)
             print(f"  Found {len(events)} events")
             all_events.extend(events)
         except Exception as e:

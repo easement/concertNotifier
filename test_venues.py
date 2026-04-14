@@ -15,6 +15,7 @@ from scraper import (
     scrape_the_loft,
     scrape_vinyl,
     scrape_city_winery,
+    scrape_helium_comedy_atlanta,
     VENUES
 )
 
@@ -81,6 +82,7 @@ async def test_all_venues():
     tasks.append(("The Loft", "https://www.centerstage-atlanta.com/", test_venue_scraper(scrape_the_loft)))
     tasks.append(("Vinyl", "https://www.centerstage-atlanta.com/", test_venue_scraper(scrape_vinyl)))
     tasks.append(("City Winery Atlanta", "https://citywinery.com/pages/events/atlanta", test_venue_scraper(scrape_city_winery)))
+    tasks.append(("Helium Comedy Club Atlanta", "https://atlanta.heliumcomedy.com/events", test_venue_scraper(scrape_helium_comedy_atlanta)))
 
     labels = [(name, url) for name, url, _ in tasks]
     coros = [coro for _, _, coro in tasks]

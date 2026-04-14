@@ -25,6 +25,7 @@ from scraper import (
     scrape_vinyl,
     scrape_city_winery,
     _parse_city_winery_date,
+    scrape_helium_comedy_atlanta,
 )
 
 
@@ -1327,6 +1328,236 @@ class TestCityWineryScraping:
         events = await scrape_city_winery(page)
         assert len(events) == 1
         assert events[0].date_parsed is None
+
+
+# ─── Helium Comedy Club Atlanta HTML Fixtures ─────────────────────────────────
+
+BADGE_URL = "https://helium-comedy.s3.amazonaws.com/MISC/HEL_SpecialEvents_Badge_60x60px.png"
+
+HELIUM_SPECIAL_EVENTS_HTML = f"""
+<html><body>
+<div class="sqs-block-content">
+
+  <!-- Special event with datetime attribute -->
+  <article class="eventlist-event">
+    <div class="eventlist-column-info">
+      <h1 class="eventlist-title">
+        <a class="eventlist-title-link" href="/events/special-show-1">Special Comedy Night</a>
+      </h1>
+      <div class="eventlist-meta">
+        <time class="event-time-localized-start" datetime="2026-07-18T19:00:00">Jul 18, 2026</time>
+      </div>
+      <div class="eventlist-description">
+        <img src="{BADGE_URL}" alt="Special Events" style="float: left; margin: 0px 10px 10px 0px;">
+        <p>An incredible special event featuring top comedians.</p>
+      </div>
+      <a class="eventlist-button sqs-button-element--primary" href="/events/special-show-1">Tickets</a>
+    </div>
+  </article>
+
+  <!-- Another special event with date text -->
+  <article class="eventlist-event">
+    <div class="eventlist-column-info">
+      <h1 class="eventlist-title">
+        <a class="eventlist-title-link" href="/events/special-show-2">Headliner Showcase</a>
+      </h1>
+      <div class="eventlist-meta">
+        <time class="event-time-localized-start" datetime="2026-08-22T20:30:00">Aug 22, 2026</time>
+      </div>
+      <div class="eventlist-description">
+        <img src="{BADGE_URL}" alt="Special Events">
+        <p>Big name headliner event.</p>
+      </div>
+      <a class="eventlist-button" href="/events/special-show-2">Buy Tickets</a>
+    </div>
+  </article>
+
+  <!-- Regular show — NO badge, should be excluded -->
+  <article class="eventlist-event">
+    <div class="eventlist-column-info">
+      <h1 class="eventlist-title">
+        <a class="eventlist-title-link" href="/events/regular-show">Open Mic Night</a>
+      </h1>
+      <div class="eventlist-meta">
+        <time class="event-time-localized-start" datetime="2026-07-20T21:00:00">Jul 20, 2026</time>
+      </div>
+      <div class="eventlist-description">
+        <p>A regular open mic show.</p>
+      </div>
+      <a class="eventlist-button" href="/events/regular-show">Tickets</a>
+    </div>
+  </article>
+
+</div>
+</body></html>
+"""
+
+HELIUM_NO_TITLE_HTML = f"""
+<html><body>
+<div class="sqs-block-content">
+  <!-- Badge but no title element -->
+  <article class="eventlist-event">
+    <div class="eventlist-description">
+      <img src="{BADGE_URL}" alt="Special Events">
+      <p>No title here.</p>
+    </div>
+  </article>
+</div>
+</body></html>
+"""
+
+HELIUM_NO_DATE_HTML = f"""
+<html><body>
+<div class="sqs-block-content">
+  <article class="eventlist-event">
+    <h1 class="eventlist-title">
+      <a href="/events/no-date-show">No Date Show</a>
+    </h1>
+    <div class="eventlist-description">
+      <img src="{BADGE_URL}" alt="Special Events">
+    </div>
+    <a class="eventlist-button" href="/events/no-date-show">Tickets</a>
+  </article>
+</div>
+</body></html>
+"""
+
+HELIUM_RELATIVE_URL_HTML = f"""
+<html><body>
+<div class="sqs-block-content">
+  <article class="eventlist-event">
+    <h1 class="eventlist-title">
+      <a href="/events/relative-link-show">Relative Link Show</a>
+    </h1>
+    <div class="eventlist-meta">
+      <time class="event-time-localized-start" datetime="2026-09-05T19:00:00">Sep 5, 2026</time>
+    </div>
+    <div class="eventlist-description">
+      <img src="{BADGE_URL}" alt="Special Events">
+    </div>
+    <a href="/events/relative-link-show">Tickets</a>
+  </article>
+</div>
+</body></html>
+"""
+
+HELIUM_DUPLICATE_BADGE_HTML = f"""
+<html><body>
+<div class="sqs-block-content">
+  <!-- Same event listed twice — should deduplicate -->
+  <article class="eventlist-event">
+    <h1 class="eventlist-title"><a href="/events/dup-show">Duplicate Show</a></h1>
+    <div class="eventlist-meta">
+      <time class="event-time-localized-start" datetime="2026-10-01T19:00:00">Oct 1, 2026</time>
+    </div>
+    <div class="eventlist-description">
+      <img src="{BADGE_URL}" alt="Special Events">
+    </div>
+    <a href="/events/dup-show">Tickets</a>
+  </article>
+  <article class="eventlist-event">
+    <h1 class="eventlist-title"><a href="/events/dup-show">Duplicate Show</a></h1>
+    <div class="eventlist-meta">
+      <time class="event-time-localized-start" datetime="2026-10-01T19:00:00">Oct 1, 2026</time>
+    </div>
+    <div class="eventlist-description">
+      <img src="{BADGE_URL}" alt="Special Events">
+    </div>
+    <a href="/events/dup-show">Tickets</a>
+  </article>
+</div>
+</body></html>
+"""
+
+
+# ─── Helium Comedy Club Atlanta Scraping ─────────────────────────────────────
+
+class TestHeliumComedyAtlantaScraping:
+    @pytest.mark.asyncio
+    async def test_only_special_event_badge_included(self):
+        page = make_mock_page(HELIUM_SPECIAL_EVENTS_HTML)
+        events = await scrape_helium_comedy_atlanta(page)
+        artists = {e.artist for e in events}
+        assert "Special Comedy Night" in artists
+        assert "Headliner Showcase" in artists
+        # Regular show without the badge must be excluded
+        assert "Open Mic Night" not in artists
+
+    @pytest.mark.asyncio
+    async def test_event_count(self):
+        page = make_mock_page(HELIUM_SPECIAL_EVENTS_HTML)
+        events = await scrape_helium_comedy_atlanta(page)
+        assert len(events) == 2
+
+    @pytest.mark.asyncio
+    async def test_venue_name_on_all_events(self):
+        page = make_mock_page(HELIUM_SPECIAL_EVENTS_HTML)
+        events = await scrape_helium_comedy_atlanta(page)
+        assert all(e.venue == "Helium Comedy Club Atlanta" for e in events)
+
+    @pytest.mark.asyncio
+    async def test_date_parsed_is_iso(self):
+        page = make_mock_page(HELIUM_SPECIAL_EVENTS_HTML)
+        events = await scrape_helium_comedy_atlanta(page)
+        event = next(e for e in events if e.artist == "Special Comedy Night")
+        assert event.date_parsed == "2026-07-18"
+
+    @pytest.mark.asyncio
+    async def test_show_time_extracted_from_datetime(self):
+        page = make_mock_page(HELIUM_SPECIAL_EVENTS_HTML)
+        events = await scrape_helium_comedy_atlanta(page)
+        event = next(e for e in events if e.artist == "Special Comedy Night")
+        assert event.show_time is not None
+        assert "7:00" in event.show_time
+
+    @pytest.mark.asyncio
+    async def test_ticket_url_set(self):
+        page = make_mock_page(HELIUM_SPECIAL_EVENTS_HTML)
+        events = await scrape_helium_comedy_atlanta(page)
+        event = next(e for e in events if e.artist == "Special Comedy Night")
+        assert event.ticket_url is not None
+        assert "special-show-1" in event.ticket_url
+
+    @pytest.mark.asyncio
+    async def test_relative_url_absolutized(self):
+        page = make_mock_page(HELIUM_RELATIVE_URL_HTML)
+        events = await scrape_helium_comedy_atlanta(page)
+        assert len(events) == 1
+        assert events[0].ticket_url.startswith("https://atlanta.heliumcomedy.com")
+
+    @pytest.mark.asyncio
+    async def test_detail_url_equals_ticket_url(self):
+        page = make_mock_page(HELIUM_SPECIAL_EVENTS_HTML)
+        events = await scrape_helium_comedy_atlanta(page)
+        for event in events:
+            assert event.detail_url == event.ticket_url
+
+    @pytest.mark.asyncio
+    async def test_card_without_title_skipped(self):
+        page = make_mock_page(HELIUM_NO_TITLE_HTML)
+        events = await scrape_helium_comedy_atlanta(page)
+        assert len(events) == 0
+
+    @pytest.mark.asyncio
+    async def test_missing_date_gracefully_handled(self):
+        page = make_mock_page(HELIUM_NO_DATE_HTML)
+        events = await scrape_helium_comedy_atlanta(page)
+        assert len(events) == 1
+        assert events[0].artist == "No Date Show"
+        assert events[0].date_parsed is None
+
+    @pytest.mark.asyncio
+    async def test_no_duplicate_hashes(self):
+        page = make_mock_page(HELIUM_DUPLICATE_BADGE_HTML)
+        events = await scrape_helium_comedy_atlanta(page)
+        hashes = [e.hash for e in events]
+        assert len(hashes) == len(set(hashes))
+
+    @pytest.mark.asyncio
+    async def test_empty_page_returns_empty_list(self):
+        page = make_mock_page("<html><body></body></html>")
+        events = await scrape_helium_comedy_atlanta(page)
+        assert events == []
 
 
 if __name__ == "__main__":
