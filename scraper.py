@@ -700,6 +700,97 @@ async def scrape_vinyl(page: Page) -> list[Event]:
     return await scrape_centerstage_atlanta_venue(page, "Vinyl", "Vinyl")
 
 
+async def scrape_city_winery(page: Page) -> list[Event]:
+    """
+    City Winery Atlanta (citywinery.com/pages/events/atlanta).
+    Events are JS-rendered with a 'Load More' button for pagination.
+    Each card has the ticket link on the outer <a class='vivenu-ticket'>.
+    Date format is 'Tue, Apr 14 @ 5:30 pm' (no year — inferred from today).
+    """
+    html = await get_page_html(
+        page,
+        "https://citywinery.com/pages/events/atlanta",
+        wait_selector=".event-list",
+        scroll=False,
+        load_more_selector="button.load-more-btn",
+    )
+    soup = BeautifulSoup(html, "html.parser")
+    events = []
+    seen_hashes = set()
+
+    for card in soup.select(".event-list > div"):
+        link_el = card.select_one("a.vivenu-ticket[href]")
+        if not link_el:
+            continue
+        ticket_url = link_el.get("href")
+
+        title_el = card.select_one("h3.event-title")
+        if not title_el:
+            continue
+        artist = title_el.get_text(strip=True)
+        if not artist or len(artist) < 2:
+            continue
+
+        date_el = card.select_one("p.event-date")
+        date_raw = date_el.get_text(strip=True) if date_el else ""
+
+        # Format: "Tue, Apr 14 @ 5:30 pm" — split into date and time
+        show_time = None
+        date_text = date_raw
+        if "@" in date_raw:
+            parts = date_raw.split("@", 1)
+            date_text = parts[0].strip()
+            show_time = parts[1].strip()
+
+        date_parsed = _parse_city_winery_date(date_text)
+
+        event = Event(
+            venue="City Winery Atlanta",
+            artist=artist,
+            date_text=date_text,
+            date_parsed=date_parsed,
+            doors=None,
+            show_time=show_time,
+            price=None,
+            ticket_url=ticket_url,
+            detail_url=ticket_url,
+        )
+        if event.hash not in seen_hashes:
+            events.append(event)
+            seen_hashes.add(event.hash)
+
+    return events
+
+
+def _parse_city_winery_date(date_text: str) -> Optional[str]:
+    """
+    Parse City Winery date strings like 'Tue, Apr 14' (no year).
+    Strips the weekday prefix, then tries the current year; if that date
+    is already past, tries next year.
+    """
+    if not date_text:
+        return None
+
+    # Try standard parsing first (handles strings that already include a year)
+    result = try_parse_date(date_text)
+    if result:
+        return result
+
+    # Strip weekday prefix: "Tue, Apr 14" → "Apr 14"
+    stripped = re.sub(r'^(Mon|Tue|Wed|Thu|Fri|Sat|Sun),?\s+', '', date_text.strip(), flags=re.I)
+
+    today = date.today()
+    for year in (today.year, today.year + 1):
+        try:
+            dt = datetime.strptime(f"{stripped} {year}", "%b %d %Y")
+            if dt.date() >= today:
+                return dt.strftime("%Y-%m-%d")
+        except ValueError:
+            continue
+
+    return None
+
+
 # ─── Helpers ──────────────────────────────────────────────────────────────────
 
 def try_parse_date(text: str) -> Optional[str]:
@@ -990,6 +1081,15 @@ async def run_scraper():
                 all_events.extend(events)
             except Exception as e:
                 print(f"  ERROR: {e}")
+
+        # City Winery Atlanta
+        print("Scraping City Winery Atlanta...")
+        try:
+            events = await scrape_city_winery(page)
+            print(f"  Found {len(events)} events")
+            all_events.extend(events)
+        except Exception as e:
+            print(f"  ERROR: {e}")
 
         await browser.close()
 

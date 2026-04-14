@@ -23,6 +23,8 @@ from scraper import (
     scrape_center_stage,
     scrape_the_loft,
     scrape_vinyl,
+    scrape_city_winery,
+    _parse_city_winery_date,
 )
 
 
@@ -1125,6 +1127,206 @@ class TestCenterStageWrappers:
         page = make_centerstage_mock_page(CSA_LISTING_HTML)
         events = await scrape_vinyl(page)
         assert all(e.venue == "Vinyl" for e in events)
+
+
+# ─── City Winery Atlanta HTML Fixtures ────────────────────────────────────────
+
+CITY_WINERY_HTML = """
+<html><body>
+<div class="flex flex-wrap -mx-2.5 gap-y-5 md:gap-y-10 event-list mt-8 md:mt-10">
+
+  <!-- Standard show with ticket link -->
+  <div class="px-2.5 w-full sm:w-1/2 md:w-1/3 xl:w-1/4">
+    <a class="vivenu-ticket block h-full" href="https://tickets.citywinery.com/event/test-artist-abc123" title="Test Artist">
+      <div class="h-full bg-white rounded-sm overflow-hidden relative flex flex-col">
+        <div class="p-5 flex flex-col grow">
+          <div class="mb-5 space-y-3">
+            <h3 class="event-title h6 line-clamp-2 !leading-[120%]">Test Artist</h3>
+            <p class="event-date font-bold text-sm">Fri, Jun 19 @ 7:30 pm</p>
+            <p class="event-venue italic text-sm">City Winery Atlanta</p>
+          </div>
+          <div class="btn-primary event-btn w-full text-center mt-auto">Get Tickets</div>
+        </div>
+      </div>
+    </a>
+  </div>
+
+  <!-- Second show — different artist -->
+  <div class="px-2.5 w-full sm:w-1/2 md:w-1/3 xl:w-1/4">
+    <a class="vivenu-ticket block h-full" href="https://tickets.citywinery.com/event/another-act-def456" title="Another Act">
+      <div class="h-full bg-white rounded-sm overflow-hidden relative flex flex-col">
+        <div class="p-5 flex flex-col grow">
+          <div class="mb-5 space-y-3">
+            <h3 class="event-title h6 line-clamp-2 !leading-[120%]">Another Act</h3>
+            <p class="event-date font-bold text-sm">Sat, Aug 01 @ 9:00 pm</p>
+            <p class="event-venue italic text-sm">City Winery Atlanta</p>
+          </div>
+          <div class="btn-primary event-btn w-full text-center mt-auto">Get Tickets</div>
+        </div>
+      </div>
+    </a>
+  </div>
+
+  <!-- Sold-out show -->
+  <div class="px-2.5 w-full sm:w-1/2 md:w-1/3 xl:w-1/4">
+    <a class="vivenu-ticket block h-full" href="https://tickets.citywinery.com/event/sold-out-band-ghi789" title="Sold Out Band">
+      <div class="h-full bg-white rounded-sm overflow-hidden relative flex flex-col">
+        <div class="relative">
+          <div class="ticket-alert text-center absolute bottom-0 left-0 text-sm bg-black">Sold out</div>
+        </div>
+        <div class="p-5 flex flex-col grow">
+          <div class="mb-5 space-y-3">
+            <h3 class="event-title h6 line-clamp-2 !leading-[120%]">Sold Out Band</h3>
+            <p class="event-date font-bold text-sm">Thu, Sep 10 @ 8:00 pm</p>
+            <p class="event-venue italic text-sm">City Winery Atlanta</p>
+          </div>
+          <div class="btn-primary event-btn w-full text-center mt-auto">Join Waitlist</div>
+        </div>
+      </div>
+    </a>
+  </div>
+
+</div>
+<button class="btn-secondary load-more-btn mt-4 cursor-pointer">Load More</button>
+</body></html>
+"""
+
+CITY_WINERY_NO_DATE_HTML = """
+<html><body>
+<div class="event-list">
+  <div class="px-2.5">
+    <a class="vivenu-ticket block h-full" href="https://tickets.citywinery.com/event/no-date-artist-jkl">
+      <div class="p-5 flex flex-col grow">
+        <div class="mb-5 space-y-3">
+          <h3 class="event-title h6 line-clamp-2 !leading-[120%]">No Date Artist</h3>
+          <p class="event-date font-bold text-sm"></p>
+          <p class="event-venue italic text-sm">City Winery Atlanta</p>
+        </div>
+      </div>
+    </a>
+  </div>
+</div>
+</body></html>
+"""
+
+
+# ─── City Winery Date Parsing ─────────────────────────────────────────────────
+
+class TestParseCityWineryDate:
+    def test_returns_none_for_empty_string(self):
+        assert _parse_city_winery_date("") is None
+
+    def test_returns_none_for_none(self):
+        assert _parse_city_winery_date(None) is None
+
+    def test_weekday_prefix_stripped(self):
+        result = _parse_city_winery_date("Fri, Jun 19")
+        assert result is not None
+        assert result.endswith("-06-19")
+
+    def test_all_weekday_abbreviations(self):
+        for day in ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"):
+            result = _parse_city_winery_date(f"{day}, Jul 04")
+            assert result is not None, f"Failed for {day}"
+            assert result.endswith("-07-04")
+
+    def test_no_weekday_prefix(self):
+        result = _parse_city_winery_date("Aug 01")
+        assert result is not None
+        assert result.endswith("-08-01")
+
+    def test_iso_date_passthrough(self):
+        assert _parse_city_winery_date("2027-03-15") == "2027-03-15"
+
+    def test_result_is_iso_format(self):
+        result = _parse_city_winery_date("Sat, Aug 01")
+        assert result is not None
+        import re
+        assert re.match(r'^\d{4}-\d{2}-\d{2}$', result)
+
+
+# ─── City Winery Atlanta Scraping ─────────────────────────────────────────────
+
+class TestCityWineryScraping:
+    @pytest.mark.asyncio
+    async def test_extracts_artists(self):
+        page = make_mock_page(CITY_WINERY_HTML)
+        events = await scrape_city_winery(page)
+        artists = {e.artist for e in events}
+        assert "Test Artist" in artists
+        assert "Another Act" in artists
+        assert "Sold Out Band" in artists
+
+    @pytest.mark.asyncio
+    async def test_venue_name_on_all_events(self):
+        page = make_mock_page(CITY_WINERY_HTML)
+        events = await scrape_city_winery(page)
+        assert all(e.venue == "City Winery Atlanta" for e in events)
+
+    @pytest.mark.asyncio
+    async def test_ticket_url_is_vivenu_link(self):
+        page = make_mock_page(CITY_WINERY_HTML)
+        events = await scrape_city_winery(page)
+        event = next(e for e in events if e.artist == "Test Artist")
+        assert event.ticket_url == "https://tickets.citywinery.com/event/test-artist-abc123"
+
+    @pytest.mark.asyncio
+    async def test_detail_url_equals_ticket_url(self):
+        page = make_mock_page(CITY_WINERY_HTML)
+        events = await scrape_city_winery(page)
+        event = next(e for e in events if e.artist == "Test Artist")
+        assert event.detail_url == event.ticket_url
+
+    @pytest.mark.asyncio
+    async def test_show_time_extracted(self):
+        page = make_mock_page(CITY_WINERY_HTML)
+        events = await scrape_city_winery(page)
+        event = next(e for e in events if e.artist == "Test Artist")
+        assert event.show_time == "7:30 pm"
+
+    @pytest.mark.asyncio
+    async def test_date_text_strips_time_component(self):
+        page = make_mock_page(CITY_WINERY_HTML)
+        events = await scrape_city_winery(page)
+        event = next(e for e in events if e.artist == "Test Artist")
+        assert "@" not in event.date_text
+        assert "7:30" not in event.date_text
+
+    @pytest.mark.asyncio
+    async def test_date_parsed_is_iso(self):
+        page = make_mock_page(CITY_WINERY_HTML)
+        events = await scrape_city_winery(page)
+        event = next(e for e in events if e.artist == "Test Artist")
+        assert event.date_parsed is not None
+        assert event.date_parsed.endswith("-06-19")
+
+    @pytest.mark.asyncio
+    async def test_sold_out_show_included(self):
+        """Sold-out shows are still scraped — the ticket link is still present."""
+        page = make_mock_page(CITY_WINERY_HTML)
+        events = await scrape_city_winery(page)
+        artists = {e.artist for e in events}
+        assert "Sold Out Band" in artists
+
+    @pytest.mark.asyncio
+    async def test_event_count(self):
+        page = make_mock_page(CITY_WINERY_HTML)
+        events = await scrape_city_winery(page)
+        assert len(events) == 3
+
+    @pytest.mark.asyncio
+    async def test_no_duplicate_hashes(self):
+        page = make_mock_page(CITY_WINERY_HTML)
+        events = await scrape_city_winery(page)
+        hashes = [e.hash for e in events]
+        assert len(hashes) == len(set(hashes))
+
+    @pytest.mark.asyncio
+    async def test_empty_date_gracefully_handled(self):
+        page = make_mock_page(CITY_WINERY_NO_DATE_HTML)
+        events = await scrape_city_winery(page)
+        assert len(events) == 1
+        assert events[0].date_parsed is None
 
 
 if __name__ == "__main__":

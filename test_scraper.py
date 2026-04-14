@@ -13,6 +13,7 @@ from scraper import (
     scrape_aisle5,
     scrape_fox_theatre,
     scrape_cobb_energy,
+    scrape_city_winery,
     try_parse_date,
     Event,
     VENUES
@@ -346,6 +347,59 @@ class TestDeduplication:
         events = await scrape_aisle5(browser_context)
         hashes = [e.hash for e in events]
         assert len(hashes) == len(set(hashes)), "Aisle 5 returned duplicate events"
+
+
+@pytest_asyncio.fixture(scope="module")
+async def city_winery_events():
+    """Scrape City Winery Atlanta once and share the result across all tests in the module."""
+    async with async_playwright() as p:
+        browser = await p.chromium.launch(headless=True)
+        context = await browser.new_context(
+            user_agent="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+                       "AppleWebKit/537.36 (KHTML, like Gecko) "
+                       "Chrome/120.0.0.0 Safari/537.36"
+        )
+        page = await context.new_page()
+        events = await scrape_city_winery(page)
+        await browser.close()
+    return events
+
+
+class TestCityWinery:
+    """Integration tests for City Winery Atlanta scraper."""
+
+    @pytest.mark.asyncio
+    async def test_city_winery_returns_events(self, city_winery_events):
+        assert isinstance(city_winery_events, list)
+        assert len(city_winery_events) > 0, "Should find at least one event"
+
+    @pytest.mark.asyncio
+    async def test_city_winery_event_structure(self, city_winery_events):
+        for event in city_winery_events:
+            assert isinstance(event, Event)
+            assert event.venue == "City Winery Atlanta"
+            assert event.artist, "Artist name should not be empty"
+            assert len(event.artist) >= 2
+            assert event.hash
+            assert event.ticket_url, "Every event should have a vivenu ticket URL"
+            assert "tickets.citywinery.com" in event.ticket_url
+
+    @pytest.mark.asyncio
+    async def test_city_winery_dates_parsed(self, city_winery_events):
+        parsed = [e for e in city_winery_events if e.date_parsed]
+        assert len(parsed) > 0, "At least some events should have parsed dates"
+        for event in parsed:
+            assert event.date_parsed[:4].isdigit(), "date_parsed should start with a 4-digit year"
+
+    @pytest.mark.asyncio
+    async def test_city_winery_no_duplicates(self, city_winery_events):
+        hashes = [e.hash for e in city_winery_events]
+        assert len(hashes) == len(set(hashes)), "City Winery Atlanta returned duplicate events"
+
+    @pytest.mark.asyncio
+    async def test_city_winery_show_times(self, city_winery_events):
+        with_times = [e for e in city_winery_events if e.show_time]
+        assert len(with_times) > 0, "At least some events should have show times"
 
 
 if __name__ == "__main__":
