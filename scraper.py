@@ -1033,46 +1033,122 @@ def load_config() -> dict:
 
 # ─── Email Notification ──────────────────────────────────────────────────────
 
+def _venue_block_html(venue: str, events: list[Event]) -> str:
+    """Render one venue section (header + event rows) for the email template."""
+    event_rows = []
+    for i, e in enumerate(events):
+        date_str = format_display_date(e)
+        meta_parts = []
+        if e.show_time:
+            meta_parts.append(e.show_time)
+        if e.price:
+            meta_parts.append(e.price)
+        url = e.ticket_url or e.detail_url
+        link_label = "Tickets" if e.ticket_url else "Info"
+        if url:
+            meta_parts.append(f'<a href="{url}" style="color:#e8c96d;text-decoration:none;border-bottom:1px solid rgba(232,201,109,0.33);">{link_label}</a>')
+        meta_str = " · ".join(meta_parts)
+
+        border = "border-bottom:1px dotted #1e2d40;" if i < len(events) - 1 else ""
+        event_rows.append(f"""
+              <tr style="{border}">
+                <td style="padding:7px 0;">
+                  <div style="font-family:'Courier New',Courier,monospace;font-size:10px;color:#4a5568;">{date_str}</div>
+                  <div style="font-family:Georgia,serif;font-size:13px;font-weight:700;color:#f0ebe0;margin:2px 0;">{e.artist}</div>
+                  <div style="font-family:'Courier New',Courier,monospace;font-size:10px;color:#4a5568;">{meta_str}</div>
+                </td>
+              </tr>""")
+
+    rows_html = "\n".join(event_rows)
+    return f"""
+        <div style="margin-bottom:18px;">
+          <div style="font-family:Arial,sans-serif;font-size:12px;font-weight:700;letter-spacing:2px;color:#e8c96d;text-transform:uppercase;border-bottom:1px solid rgba(232,201,109,0.33);padding-bottom:5px;">{venue}</div>
+          <table style="width:100%;border-collapse:collapse;">
+            {rows_html}
+          </table>
+        </div>"""
+
+
 def build_email_html(new_events: list[Event]) -> str:
-    """Build a styled HTML email body from new events."""
+    """Build a styled HTML email body from new events (broadsheet dark theme)."""
     by_venue: dict[str, list[Event]] = {}
     for e in new_events:
         by_venue.setdefault(e.venue, []).append(e)
 
-    rows = []
-    for venue in sorted(by_venue):
-        rows.append(f'<tr><td colspan="4" style="padding:12px 8px 4px;font-size:16px;'
-                     f'font-weight:bold;color:#1a1a2e;border-bottom:2px solid #e94560;">'
-                     f'📍 {venue}</td></tr>')
-        for e in by_venue[venue]:
-            date_str = format_display_date(e)
-            price_str = e.price or ""
-            link = ""
-            if e.ticket_url:
-                link = f'<a href="{e.ticket_url}" style="color:#e94560;text-decoration:none;">Tickets</a>'
-            elif e.detail_url:
-                link = f'<a href="{e.detail_url}" style="color:#e94560;text-decoration:none;">Info</a>'
+    venues = sorted(by_venue.keys())
+    mid = (len(venues) + 1) // 2
+    left_venues = venues[:mid]
+    right_venues = venues[mid:]
 
-            rows.append(
-                f'<tr style="border-bottom:1px solid #eee;">'
-                f'<td style="padding:6px 8px;color:#555;">{date_str}</td>'
-                f'<td style="padding:6px 8px;font-weight:500;">{e.artist}</td>'
-                f'<td style="padding:6px 8px;color:#777;">{price_str}</td>'
-                f'<td style="padding:6px 8px;">{link}</td>'
-                f'</tr>'
-            )
+    left_html = "".join(_venue_block_html(v, by_venue[v]) for v in left_venues)
+    right_html = "".join(_venue_block_html(v, by_venue[v]) for v in right_venues)
 
-    table_rows = "\n".join(rows)
-    return f"""
-    <html><body style="font-family:-apple-system,Helvetica,Arial,sans-serif;color:#333;max-width:640px;margin:auto;">
-    <h2 style="color:#1a1a2e;">🎵 {len(new_events)} New Atlanta Shows</h2>
-    <p style="color:#777;">Found on {datetime.now().strftime('%B %d, %Y at %I:%M %p')}</p>
-    <table style="width:100%;border-collapse:collapse;font-size:14px;">
-    {table_rows}
-    </table>
-    <p style="margin-top:24px;font-size:12px;color:#aaa;">Atlanta Concert Scraper</p>
-    </body></html>
-    """
+    now = datetime.now()
+    date_long = now.strftime("%A, %B %d, %Y")
+    date_scanned = now.strftime("%B %d, %Y at %I:%M %p")
+    count = len(new_events)
+
+    return f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>The Show Report</title>
+</head>
+<body style="margin:0;padding:0;background:#0c0f1a;font-family:Georgia,serif;">
+<div style="max-width:620px;margin:0 auto;padding:28px 20px;background:#111827;">
+
+  <!-- overline -->
+  <div style="border-top:5px double #e8c96d;border-bottom:1px solid #e8c96d;padding:6px 0;margin-bottom:14px;">
+    <table style="width:100%;border-collapse:collapse;"><tr>
+      <td style="font-family:Arial,sans-serif;font-size:9px;font-weight:600;letter-spacing:3px;color:#e8c96d;text-transform:uppercase;">Est. Daily Digest</td>
+      <td style="font-family:Arial,sans-serif;font-size:9px;font-weight:600;letter-spacing:3px;color:#e8c96d;text-transform:uppercase;text-align:right;">Atlanta, Georgia</td>
+    </tr></table>
+  </div>
+
+  <!-- masthead -->
+  <div style="text-align:center;border-bottom:3px double #e8c96d;padding-bottom:14px;margin-bottom:14px;">
+    <div style="font-family:Georgia,serif;font-size:48px;font-weight:700;color:#f5f0e8;line-height:1;letter-spacing:-1px;">The Show Report</div>
+    <div style="font-family:Arial,sans-serif;font-size:10px;letter-spacing:5px;color:#4a5568;text-transform:uppercase;margin-top:8px;">{date_long}</div>
+  </div>
+
+  <!-- headline row -->
+  <table style="width:100%;border-collapse:collapse;border-bottom:2px solid #e8c96d;margin-bottom:24px;padding-bottom:0;">
+    <tr style="vertical-align:middle;">
+      <td style="padding-right:20px;border-right:1px solid #1e2d40;padding-bottom:16px;width:1%;white-space:nowrap;">
+        <div style="font-family:Georgia,serif;font-size:88px;font-weight:700;color:#e8c96d;line-height:0.9;margin-bottom:6px;">{count}</div>
+        <div style="font-family:Arial,sans-serif;font-size:10px;font-weight:600;letter-spacing:2px;color:#4a5568;text-transform:uppercase;">New Shows</div>
+      </td>
+      <td style="padding-left:20px;padding-bottom:16px;">
+        <div style="font-family:Georgia,serif;font-size:16px;font-style:italic;color:#a0aab8;line-height:1.45;margin-bottom:10px;">Newly listed performances found across Atlanta venues in this morning&#39;s automated scan.</div>
+        <div style="font-family:'Courier New',Courier,monospace;font-size:10px;color:#4a5568;letter-spacing:1px;">Scanned {date_scanned}</div>
+      </td>
+    </tr>
+  </table>
+
+  <!-- two-column event listing -->
+  <table style="width:100%;border-collapse:collapse;">
+    <tr style="vertical-align:top;">
+      <td style="width:49%;padding-right:16px;border-right:1px solid #1e2d40;">
+        {left_html}
+      </td>
+      <td style="width:49%;padding-left:16px;">
+        {right_html}
+      </td>
+    </tr>
+  </table>
+
+  <!-- footer -->
+  <div style="border-top:3px double #e8c96d;margin-top:8px;padding-top:10px;">
+    <table style="width:100%;border-collapse:collapse;"><tr>
+      <td style="font-family:Arial,sans-serif;font-size:9px;letter-spacing:3px;color:#2d3748;text-transform:uppercase;">Atlanta Concert Scraper</td>
+      <td style="font-family:Arial,sans-serif;font-size:9px;letter-spacing:3px;color:#2d3748;text-transform:uppercase;text-align:right;">Automated Daily Digest</td>
+    </tr></table>
+  </div>
+
+</div>
+</body>
+</html>"""
 
 
 def send_email(new_events: list[Event], config: dict):
