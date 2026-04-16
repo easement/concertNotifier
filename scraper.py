@@ -918,17 +918,34 @@ def try_parse_date(text: str) -> Optional[str]:
         except ValueError:
             pass
 
+    # Fix year-time concatenation: "Sat, Apr 25, 20268:00 PM" → "Sat, Apr 25, 2026 8:00 PM"
+    text = re.sub(r'(\d{4})(\d{1,2}:\d{2})', r'\1 \2', text)
+
+    # Handle compact AEG card format: "MonJun15" → infer year
+    m = re.match(r'^([A-Za-z]{3})([A-Za-z]{3})(\d{1,2})$', text.strip())
+    if m:
+        today = date.today()
+        for year in (today.year, today.year + 1):
+            try:
+                dt = datetime.strptime(f"{m.group(2)} {m.group(3)} {year}", "%b %d %Y")
+                if dt.date() >= today:
+                    return dt.strftime("%Y-%m-%d")
+            except ValueError:
+                continue
+
     # Try common formats
     formats = [
-        "%A, %b. %d, %Y",     # Wednesday, Apr. 8, 2026
-        "%A, %B %d, %Y",      # Wednesday, April 8, 2026
-        "%b %d, %Y",          # Apr 8, 2026
-        "%B %d, %Y",          # April 8, 2026
-        "%m/%d/%Y",           # 04/08/2026
-        "%A %b %d %Y",        # Wednesday Apr 8 2026
-        "%A %B %d %Y",        # Wednesday April 8 2026
-        "%b %d %Y",           # Apr 9 2026 (PAC venue normalized)
-        "%B %d %Y",           # April 9 2026
+        "%A, %b. %d, %Y",        # Wednesday, Apr. 8, 2026
+        "%A, %B %d, %Y",         # Wednesday, April 8, 2026
+        "%a %b %d %Y %I:%M %p",   # Sat Apr 25 2026 8:00 PM (after concat fix + cleaning)
+        "%a %b %d %Y %H:%M",     # Sat Apr 25 2026 20:00
+        "%b %d, %Y",             # Apr 8, 2026
+        "%B %d, %Y",             # April 8, 2026
+        "%m/%d/%Y",              # 04/08/2026
+        "%A %b %d %Y",           # Wednesday Apr 8 2026
+        "%A %B %d %Y",           # Wednesday April 8 2026
+        "%b %d %Y",              # Apr 9 2026 (PAC venue normalized)
+        "%B %d %Y",              # April 9 2026
     ]
 
     # Clean up common noise
