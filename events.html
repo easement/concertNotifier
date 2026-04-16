@@ -82,11 +82,65 @@
   }
 
   .header-count {
-    margin-left: auto;
     font-family: var(--font-mono);
     font-size: 0.72rem;
     color: var(--gray);
     flex-shrink: 0;
+  }
+
+  /* ─── Search ─── */
+  .search-wrap {
+    width: 240px;
+    margin-left: auto;
+    margin-right: 16px;
+    position: relative;
+    display: flex;
+    align-items: center;
+    flex-shrink: 0;
+  }
+  .search-input {
+    width: 100%;
+    background: var(--navy-mid);
+    border: 1px solid var(--border);
+    border-radius: 20px;
+    padding: 7px 30px 7px 14px;
+    font-family: var(--font-body);
+    font-size: 0.8rem;
+    color: var(--white);
+    outline: none;
+    transition: border-color 0.18s, background 0.18s;
+    -webkit-appearance: none;
+  }
+  .search-input::placeholder { color: var(--gray-dim); }
+  .search-input:focus {
+    border-color: var(--gray-dim);
+    background: var(--navy-card);
+  }
+  .search-input::-webkit-search-cancel-button { display: none; }
+  .search-clear {
+    position: absolute;
+    right: 10px;
+    background: none;
+    border: none;
+    color: var(--gray-dim);
+    cursor: pointer;
+    font-size: 0.68rem;
+    line-height: 1;
+    padding: 2px 4px;
+    display: none;
+    transition: color 0.15s;
+  }
+  .search-clear:hover { color: var(--white); }
+  .search-clear.visible { display: block; }
+
+  /* ─── Search results empty state ─── */
+  .search-empty {
+    padding: 60px 0;
+    text-align: center;
+    font-family: var(--font-mono);
+    font-size: 0.78rem;
+    color: var(--gray-dim);
+    letter-spacing: 0.06em;
   }
 
   /* ─── Tab Nav ─── */
@@ -465,6 +519,7 @@
     .site-title { font-size: 1.5rem; }
     .header-count { display: none; }
     .venue-name { font-size: 1.3rem; }
+    .search-wrap { width: 160px; margin-right: 8px; }
   }
 </style>
 </head>
@@ -474,6 +529,11 @@
   <div class="header-inner">
     <div class="site-title">Atlanta<span>&nbsp;Shows</span></div>
     <div class="header-meta">Upcoming events</div>
+    <div class="search-wrap">
+      <input type="search" id="eventSearch" class="search-input"
+             placeholder="Search artists…" autocomplete="off" spellcheck="false" aria-label="Search artists">
+      <button type="button" id="searchClear" class="search-clear" aria-label="Clear search">✕</button>
+    </div>
     <div class="header-count" id="header-count">847 shows</div>
   </div>
 </header>
@@ -486,7 +546,7 @@
 <main class="main" id="mainContent"></main>
 
 <footer class="site-footer">
-  Atlanta Concert Scraper &nbsp;·&nbsp; Generated April 16, 2026 at 06:54 PM
+  Atlanta Concert Scraper &nbsp;·&nbsp; Generated April 16, 2026 at 06:59 PM
 </footer>
 
 <script>
@@ -8460,6 +8520,95 @@
   const firstPanel = document.getElementById('panel-all');
   if (firstPanel) firstPanel.classList.add('active');
   renderNav1();
+
+  // ── Search ──
+  const searchInput = document.getElementById('eventSearch');
+  const searchClear = document.getElementById('searchClear');
+  const headerCount = document.getElementById('header-count');
+  const totalShows = Object.values(VENUES).reduce((a, v) => a + v.length, 0);
+
+  // Flat event index with venue attached
+  const allEventIndex = [];
+  venueNames.forEach(venue => {
+    (VENUES[venue] || []).forEach(e => allEventIndex.push({ venue, ...e }));
+  });
+
+  // Build and append the search results panel
+  const searchPanel = document.createElement('div');
+  searchPanel.className = 'venue-panel';
+  searchPanel.id = 'panel-search';
+  mainContent.appendChild(searchPanel);
+
+  let savedTabId = 'all';
+
+  function doSearch(query) {
+    const q = query.trim().toLowerCase();
+    const isActive = searchPanel.classList.contains('active');
+
+    searchClear.classList.toggle('visible', query.length > 0);
+
+    if (!q) {
+      // Exit search — restore the previous tab
+      searchPanel.classList.remove('active');
+      switchTab(savedTabId);
+      headerCount.textContent = `${totalShows} shows`;
+      return;
+    }
+
+    // Save current tab before entering search mode
+    if (!isActive) {
+      const activeBtn = document.querySelector('.tab-btn.active');
+      savedTabId = activeBtn ? activeBtn.dataset.tab : 'all';
+    }
+
+    // Show only the search panel
+    document.querySelectorAll('.venue-panel').forEach(p => p.classList.remove('active'));
+    document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+    searchPanel.classList.add('active');
+
+    // Filter and group by venue
+    const matches = allEventIndex.filter(e => e.artist.toLowerCase().includes(q));
+    const byVenue = {};
+    matches.forEach(e => {
+      byVenue[e.venue] = byVenue[e.venue] || [];
+      byVenue[e.venue].push(e);
+    });
+
+    if (matches.length === 0) {
+      searchPanel.innerHTML = `<div class="search-empty">No results for &ldquo;${escHtml(query)}&rdquo;</div>`;
+    } else {
+      searchPanel.innerHTML = Object.entries(byVenue).map(([venue, events]) => `
+        <div class="venue-section">
+          <div class="venue-heading">
+            <div>
+              <div class="venue-name">${escHtml(venue)}</div>
+              <div class="venue-event-count">${events.length} match${events.length === 1 ? '' : 'es'}</div>
+            </div>
+          </div>
+          ${buildTable(events)}
+        </div>
+      `).join('');
+    }
+
+    headerCount.textContent = `${matches.length} match${matches.length === 1 ? '' : 'es'}`;
+  }
+
+  searchInput.addEventListener('input', e => doSearch(e.target.value));
+
+  searchClear.addEventListener('click', () => {
+    searchInput.value = '';
+    doSearch('');
+    searchInput.focus();
+  });
+
+  // Pressing Escape clears search
+  searchInput.addEventListener('keydown', e => {
+    if (e.key === 'Escape') {
+      searchInput.value = '';
+      doSearch('');
+      searchInput.blur();
+    }
+  });
 })();
 </script>
 </body>
