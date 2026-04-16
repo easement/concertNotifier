@@ -216,7 +216,7 @@ async def scrape_aeg_venue(page: Page, url: str, venue_name: str) -> list[Event]
         artist = re.sub(r'^(.*?\s+)?presents?\s+', '', artist, flags=re.IGNORECASE)
         artist = re.sub(r'^(.*?)\s+&\s+(.*?\s+)?presents?\s+', '', artist, flags=re.IGNORECASE)
 
-        date_text = date_el.get_text(strip=True) if date_el else ""
+        date_text = date_el.get_text(separator=" ", strip=True) if date_el else ""
         link = link_el["href"] if link_el and link_el.has_attr("href") else None
 
         # Skip invalid entries (calendar headers, month labels, empty artists)
@@ -257,23 +257,23 @@ async def scrape_aeg_venue(page: Page, url: str, venue_name: str) -> list[Event]
     for event in events:
         key = f"{event.venue}|{event.artist}".lower()
 
-        # Determine if this event has a real date
-        has_real_date = event.date_parsed or (event.date_text and event.date_text != "TBA" and len(event.date_text) > 3)
+        # Determine if this event has a real parsed date
+        has_real_date = event.date_parsed is not None
 
         if key not in artist_dates:
             artist_dates[key] = event
         else:
-            # Keep the one with a real date
-            existing_has_date = artist_dates[key].date_parsed or (artist_dates[key].date_text and artist_dates[key].date_text != "TBA" and len(artist_dates[key].date_text) > 3)
+            # Keep the one with a parsed date
+            existing_has_date = artist_dates[key].date_parsed is not None
 
             if has_real_date and not existing_has_date:
-                # Replace TBA with real date
+                # Replace unparsed entry with one that has a real date
                 artist_dates[key] = event
             elif not has_real_date and existing_has_date:
                 # Keep the existing one with real date
                 pass
             else:
-                # Both have dates or both are TBA - keep both
+                # Both have parsed dates or both are unparsed - keep both
                 filtered_events.append(event)
 
     # Add all the best entries
@@ -837,6 +837,21 @@ def try_parse_date(text: str) -> Optional[str]:
             return dt.strftime("%Y-%m-%d")
         except ValueError:
             continue
+
+    # Try "MON Jun 15" format (day-of-week abbrev + month abbrev + day, no year)
+    # e.g. Aisle 5 / SeeTickets renders dates with separate sub-elements that
+    # concatenate to this shape when joined with spaces.
+    m = re.match(r'^[A-Za-z]{3}\s+([A-Za-z]{3})\s+(\d{1,2})$', cleaned)
+    if m:
+        today_date = date.today()
+        month_abbrev, day_num = m.group(1), m.group(2)
+        for year in (today_date.year, today_date.year + 1):
+            try:
+                dt = datetime.strptime(f"{month_abbrev} {day_num} {year}", "%b %d %Y")
+                if dt.date() >= today_date:
+                    return dt.strftime("%Y-%m-%d")
+            except ValueError:
+                continue
 
     return None
 
