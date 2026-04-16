@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Generate a styled HTML events page from concerts.db → events.html"""
 
+import re
 import sqlite3
 import json
 import os
@@ -8,6 +9,66 @@ from datetime import date, datetime
 
 DB_PATH = os.path.join(os.path.dirname(__file__), "concerts.db")
 OUTPUT_PATH = os.path.join(os.path.dirname(__file__), "events.html")
+
+
+def _parse_date_from_text(text: str) -> tuple[str | None, str | None]:
+    """
+    Best-effort extraction of (date_parsed, show_time) from a raw date_text
+    string.  Handles the common AEG format "Fri, Oct 16, 20268:00 PM" (year
+    and time concatenated) as well as a handful of other patterns used by the
+    scrapers.
+
+    Returns (ISO-date-or-None, time-string-or-None).
+    """
+    if not text:
+        return None, None
+
+    # Fix year-time concatenation: "20268:00 PM" → "2026 8:00 PM"
+    text = re.sub(r"(\d{4})(\d{1,2}:\d{2})", r"\1 \2", text)
+
+    # Extract time before we strip it away
+    time_match = re.search(r"\b(\d{1,2}:\d{2}\s*(?:AM|PM))\b", text, re.I)
+    show_time = time_match.group(1).strip() if time_match else None
+
+    # Common cleanup
+    cleaned = re.sub(r"\s+", " ", text).strip()
+    cleaned = re.sub(r"(\d+)(st|nd|rd|th)", r"\1", cleaned)
+    cleaned = re.sub(r"(?<=\w)\.(?=\s)", "", cleaned)
+    cleaned = re.sub(r"\s*/\s*", " ", cleaned)
+    cleaned = re.sub(r"\s*,\s*", " ", cleaned)
+    cleaned = re.sub(r"\s+", " ", cleaned).strip()
+
+    formats = [
+        "%a %b %d %Y %I:%M %p",   # Fri Oct 16 2026 8:00 PM
+        "%a %b %d %Y %H:%M",      # Fri Oct 16 2026 20:00
+        "%a %b %d %Y",            # Fri Oct 16 2026
+        "%A %b %d %Y",            # Friday Oct 16 2026
+        "%A %B %d %Y",            # Friday October 16 2026
+        "%b %d %Y",               # Oct 16 2026
+        "%B %d %Y",               # October 16 2026
+        "%b %d, %Y",              # Oct 16, 2026
+        "%Y-%m-%d",               # 2026-10-16
+    ]
+    for fmt in formats:
+        try:
+            dt = datetime.strptime(cleaned, fmt)
+            return dt.strftime("%Y-%m-%d"), show_time
+        except ValueError:
+            continue
+
+    # Compact format with no spaces: "MonApr20" → infer year
+    m = re.match(r"^([A-Za-z]{3})([A-Za-z]{3})(\d{1,2})$", cleaned)
+    if m:
+        today_d = date.today()
+        for year in (today_d.year, today_d.year + 1):
+            try:
+                dt = datetime.strptime(f"{m.group(2)} {m.group(3)} {year}", "%b %d %Y")
+                if dt.date() >= today_d:
+                    return dt.strftime("%Y-%m-%d"), show_time
+            except ValueError:
+                continue
+
+    return None, show_time
 
 
 def get_upcoming_events() -> dict[str, list[dict]]:
@@ -27,12 +88,19 @@ def get_upcoming_events() -> dict[str, list[dict]]:
     venues: dict[str, list[dict]] = {}
     for row in cur.fetchall():
         venue = row["venue"]
+        date_parsed = row["date_parsed"] or ""
+        show_time = row["show_time"] or ""
+        if not date_parsed and row["date_text"]:
+            parsed, extracted_time = _parse_date_from_text(row["date_text"])
+            date_parsed = parsed or ""
+            if not show_time and extracted_time:
+                show_time = extracted_time
         venues.setdefault(venue, []).append(
             {
                 "artist": row["artist"] or "",
                 "date_text": row["date_text"] or "",
-                "date_parsed": row["date_parsed"] or "",
-                "show_time": row["show_time"] or "",
+                "date_parsed": date_parsed,
+                "show_time": show_time,
                 "price": row["price"] or "",
                 "ticket_url": row["ticket_url"] or "",
                 "detail_url": row["detail_url"] or "",
@@ -595,9 +663,9 @@ def generate_html(venues: dict[str, list[dict]]) -> str:
     const rows = events.map(e => {{
       const isToday = e.date_parsed === TODAY;
       const todayBadge = isToday ? '<span class="today-badge">Today</span>' : '';
-      const dateDisplay = e.date_text
-        ? escHtml(e.date_text)
-        : (e.date_parsed || '<span style="color:var(--gray-dim)">TBA</span>');
+      const dateDisplay = e.date_parsed
+        ? formatDate(e.date_parsed)
+        : (e.date_text ? escHtml(e.date_text) : '<span style="color:var(--gray-dim)">TBA</span>');
       const timeDisplay = e.show_time ? escHtml(e.show_time) : '';
       const priceDisplay = e.price ? escHtml(e.price) : '';
       let linkHtml = '';
@@ -631,6 +699,16 @@ def generate_html(venues: dict[str, list[dict]]) -> str:
   }}
 
   // ── Helpers ──
+  function formatDate(iso) {{
+    // iso is "YYYY-MM-DD" — parse locally to avoid UTC timezone shifts
+    const [year, month, day] = iso.split('-').map(Number);
+    const d = new Date(year, month - 1, day);
+    const dow = ['Sun','Mon','Tue','Wed','Thurs','Fri','Sat'][d.getDay()];
+    const mon = ['January','February','March','April','May','June','July',
+                 'August','September','October','November','December'][d.getMonth()];
+    return `(${{dow}}) ${{mon}} ${{day}}`;
+  }}
+
   function escHtml(s) {{
     return String(s)
       .replace(/&/g, '&amp;')
