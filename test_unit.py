@@ -287,6 +287,23 @@ class TestTryParseDate:
     def test_weekday_prefix(self):
         assert try_parse_date("Wednesday, April 8, 2026") == "2026-04-08"
 
+    def test_seetickets_no_year_future_date(self):
+        # SeeTickets (Aisle 5) renders dates as "MON Jun 15" - day abbrev + month + day, no year.
+        # June 15 is in the future relative to the test date context (2026-04-16).
+        result = try_parse_date("MON Jun 15")
+        assert result is not None
+        assert result.endswith("-06-15")
+
+    def test_seetickets_time_string_returns_none(self):
+        # "8:00PM 7:00PM" is a time string that should NOT parse as a date.
+        assert try_parse_date("8:00PM 7:00PM") is None
+
+    def test_seetickets_lowercase_day_abbrev(self):
+        # Variant with lowercase day abbreviation.
+        result = try_parse_date("Mon Jun 15")
+        assert result is not None
+        assert result.endswith("-06-15")
+
 
 # ─── Format Display Date ──────────────────────────────────────────────────────
 
