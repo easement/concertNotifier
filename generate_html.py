@@ -143,37 +143,31 @@ def generate_html(venues: dict[str, list[dict]]) -> str:
   .tab-nav-wrap {{
     background: var(--navy-deep);
     border-bottom: 1px solid var(--border);
-    position: sticky;
-    top: 64px;
-    z-index: 99;
   }}
 
   .tab-nav {{
     max-width: 1200px;
     margin: 0 auto;
-    padding: 0 24px;
+    padding: 0 16px;
     display: flex;
+    flex-wrap: wrap;
     gap: 0;
-    overflow-x: auto;
-    scrollbar-width: none;
   }}
-  .tab-nav::-webkit-scrollbar {{ display: none; }}
 
   .tab-btn {{
     display: flex;
     align-items: center;
     gap: 7px;
-    padding: 14px 18px;
+    padding: 11px 14px;
     background: none;
     border: none;
     cursor: pointer;
     font-family: var(--font-body);
-    font-size: 0.8rem;
+    font-size: 0.78rem;
     font-weight: 500;
     letter-spacing: 0.02em;
     color: var(--gray);
     border-bottom: 2px solid transparent;
-    margin-bottom: -1px;
     white-space: nowrap;
     transition: color 0.18s, border-color 0.18s;
     position: relative;
