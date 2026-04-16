@@ -100,6 +100,16 @@ def upsert_events(conn: sqlite3.Connection, events: list[Event]) -> list[Event]:
     return new_events
 
 
+def cleanup_past_events(conn: sqlite3.Connection) -> int:
+    """Delete events whose parsed date is in the past. Returns count deleted."""
+    today = datetime.now().strftime("%Y-%m-%d")
+    cursor = conn.execute(
+        "DELETE FROM events WHERE date_parsed IS NOT NULL AND date_parsed < ?", (today,)
+    )
+    conn.commit()
+    return cursor.rowcount
+
+
 # ─── Browser Helpers ──────────────────────────────────────────────────────────
 
 async def scroll_to_bottom(page: Page, max_scrolls: int = 50, wait_ms: int = 2000):
@@ -1322,7 +1332,8 @@ async def run_scraper():
     # Detect new events
     print(f"\nComparing with database to detect new events...")
     all_new = upsert_events(conn, all_events)
-    print(f"Database updated!")
+    deleted = cleanup_past_events(conn)
+    print(f"Database updated! ({deleted} past events removed)")
 
     # Send email if there are new events
     config = load_config()

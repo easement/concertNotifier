@@ -14,6 +14,7 @@ from scraper import (
     format_display_date,
     build_email_html,
     upsert_events,
+    cleanup_past_events,
     scrape_aeg_venue,
     scrape_the_earl,
     scrape_goat_farm,
@@ -458,6 +459,42 @@ class TestDatabase:
         upsert_events(self.conn, [e_old])
         new = upsert_events(self.conn, [e_old, e_new])
         assert len(new) == 1 and new[0].artist == "New"
+
+    def test_cleanup_removes_past_events(self):
+        past = make_event(artist="Past Artist", date_parsed="2020-01-01", ticket_url="https://t.com/past")
+        upsert_events(self.conn, [past])
+        deleted = cleanup_past_events(self.conn)
+        assert deleted == 1
+        row = self.conn.execute("SELECT hash FROM events WHERE hash=?", (past.hash,)).fetchone()
+        assert row is None
+
+    def test_cleanup_keeps_future_events(self):
+        future = make_event(artist="Future Artist", date_parsed="2099-12-31", ticket_url="https://t.com/future")
+        upsert_events(self.conn, [future])
+        deleted = cleanup_past_events(self.conn)
+        assert deleted == 0
+        row = self.conn.execute("SELECT hash FROM events WHERE hash=?", (future.hash,)).fetchone()
+        assert row is not None
+
+    def test_cleanup_keeps_events_with_no_parsed_date(self):
+        no_date = make_event(artist="TBA Artist", date_parsed=None, date_text="TBA", ticket_url="https://t.com/tba")
+        upsert_events(self.conn, [no_date])
+        deleted = cleanup_past_events(self.conn)
+        assert deleted == 0
+        row = self.conn.execute("SELECT hash FROM events WHERE hash=?", (no_date.hash,)).fetchone()
+        assert row is not None
+
+    def test_cleanup_returns_count_of_deleted(self):
+        events = [
+            make_event(artist="Past 1", date_parsed="2020-01-01", ticket_url="https://t.com/1"),
+            make_event(artist="Past 2", date_parsed="2021-06-15", ticket_url="https://t.com/2"),
+            make_event(artist="Future", date_parsed="2099-01-01", ticket_url="https://t.com/3"),
+        ]
+        upsert_events(self.conn, events)
+        assert cleanup_past_events(self.conn) == 2
+
+    def test_cleanup_on_empty_db_returns_zero(self):
+        assert cleanup_past_events(self.conn) == 0
 
 
 # ─── Scraper HTML Parsing ─────────────────────────────────────────────────────
