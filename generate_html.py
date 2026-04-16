@@ -203,6 +203,118 @@ def generate_html(venues: dict[str, list[dict]]) -> str:
     color: var(--coral);
   }}
 
+  /* ─── Nav Style Switcher ─── */
+  .nav-style-switcher {{
+    display: flex;
+    align-items: center;
+    gap: 3px;
+    margin-left: auto;
+    padding: 0 8px;
+    flex-shrink: 0;
+  }}
+  .nav-style-btn {{
+    width: 22px;
+    height: 22px;
+    border-radius: 4px;
+    border: 1px solid var(--border);
+    background: none;
+    color: var(--gray-dim);
+    font-family: var(--font-mono);
+    font-size: 0.62rem;
+    cursor: pointer;
+    transition: all 0.15s;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }}
+  .nav-style-btn:hover {{
+    color: var(--white);
+    border-color: var(--gray);
+  }}
+  .nav-style-btn.active {{
+    background: var(--navy-mid);
+    color: var(--white);
+    border-color: var(--gray-dim);
+  }}
+
+  /* ─── Approach 1: Group separator ─── */
+  .tab-group-sep {{
+    display: flex;
+    align-items: center;
+    padding: 0 10px;
+    color: var(--gray-dim);
+    font-family: var(--font-mono);
+    font-size: 0.58rem;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    white-space: nowrap;
+    border-left: 1px solid var(--border);
+    border-right: 1px solid var(--border);
+    margin: 6px 4px;
+    align-self: stretch;
+  }}
+
+  /* ─── Approach 2: Dropdown ─── */
+  .masq-dropdown-wrap {{
+    position: relative;
+  }}
+  .tab-btn.masq-parent::after {{
+    content: ' ▾';
+    font-size: 0.65rem;
+    opacity: 0.7;
+  }}
+  .masq-dropdown {{
+    position: absolute;
+    top: calc(100% + 1px);
+    left: 0;
+    background: var(--navy-mid);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 4px;
+    display: none;
+    flex-direction: column;
+    min-width: 200px;
+    z-index: 200;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.5);
+  }}
+  .masq-dropdown.open {{
+    display: flex;
+  }}
+  .masq-dropdown .tab-btn {{
+    border-bottom-color: transparent;
+    border-radius: 4px;
+    padding: 9px 12px;
+    width: 100%;
+    justify-content: space-between;
+  }}
+  .masq-dropdown .tab-btn:hover {{
+    background: var(--navy-card);
+  }}
+  .masq-dropdown .tab-btn.active {{
+    background: var(--navy-card);
+    border-bottom-color: transparent;
+  }}
+
+  /* ─── Approach 3: Two-tier nav ─── */
+  .tab-nav-sub {{
+    display: none;
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 0 16px;
+    border-top: 1px solid var(--border);
+  }}
+  .tab-nav-sub.active {{
+    display: flex;
+    flex-wrap: wrap;
+  }}
+  .tab-nav-sub .tab-btn {{
+    font-size: 0.72rem;
+    padding: 8px 12px;
+  }}
+  .tab-nav-sub .tab-btn.active {{
+    border-bottom-color: var(--coral-dim);
+  }}
+
   /* ─── Main Content ─── */
   .main {{
     max-width: 1200px;
@@ -418,6 +530,7 @@ def generate_html(venues: dict[str, list[dict]]) -> str:
 
 <nav class="tab-nav-wrap" aria-label="Venues">
   <div class="tab-nav" id="tabNav"></div>
+  <div class="tab-nav-sub" id="tabNavSub"></div>
 </nav>
 
 <main class="main" id="mainContent"></main>
@@ -528,36 +641,205 @@ def generate_html(venues: dict[str, list[dict]]) -> str:
   function escAttr(s) {{ return escHtml(s); }}
   function slugify(s) {{ return s.toLowerCase().replace(/[^a-z0-9]+/g, '-'); }}
 
-  // ── Render tabs ──
-  const allTabs = [{{ id: 'all', label: 'All Venues', count: Object.values(VENUES).reduce((a,v) => a + v.length, 0) }}];
-  venueNames.forEach(v => allTabs.push({{ id: slugify(v), label: v, count: (VENUES[v] || []).length }}));
+  // ── Categorize venues ──
+  const masqueradeVenues = venueNames.filter(v => v.includes('Masquerade'));
+  const otherVenues = venueNames.filter(v => !v.includes('Masquerade'));
+  const masqTotalCount = masqueradeVenues.reduce((a, v) => a + (VENUES[v] || []).length, 0);
 
-  allTabs.forEach((tab, i) => {{
-    const btn = document.createElement('button');
-    btn.className = 'tab-btn' + (i === 0 ? ' active' : '');
-    btn.dataset.tab = tab.id;
-    btn.setAttribute('type', 'button');
-    btn.innerHTML = `${{escHtml(tab.label)}}<span class="tab-count">${{tab.count}}</span>`;
-    btn.addEventListener('click', () => switchTab(tab.id));
-    tabNav.appendChild(btn);
-  }});
+  // ── Build Masquerade aggregate panel ──
+  function buildMasqPanel() {{
+    const el = document.createElement('div');
+    el.className = 'venue-panel';
+    el.id = 'panel-masquerade';
+    masqueradeVenues.forEach(venue => {{
+      const events = VENUES[venue];
+      if (!events || events.length === 0) return;
+      const section = document.createElement('div');
+      section.className = 'venue-section';
+      section.innerHTML = `
+        <div class="venue-heading">
+          <div>
+            <div class="venue-name">${{venue}}</div>
+            <div class="venue-event-count">${{events.length}} upcoming</div>
+          </div>
+        </div>
+        ${{buildTable(events)}}
+      `;
+      el.appendChild(section);
+    }});
+    if (el.children.length === 0) {{
+      el.innerHTML = '<div class="empty-state">No upcoming events.</div>';
+    }}
+    return el;
+  }}
 
   // ── Render panels ──
   mainContent.appendChild(buildAllPanel());
+  mainContent.appendChild(buildMasqPanel());
   venueNames.forEach(v => mainContent.appendChild(buildVenuePanel(v)));
 
-  // Activate first panel
-  const firstPanel = document.getElementById('panel-all');
-  if (firstPanel) firstPanel.classList.add('active');
+  // ── Nav style state ──
+  let currentStyle = 1;
+  let masqDropdownOpen = false;
 
   // ── Tab switching ──
   function switchTab(id) {{
     document.querySelectorAll('.tab-btn').forEach(b => b.classList.toggle('active', b.dataset.tab === id));
     document.querySelectorAll('.venue-panel').forEach(p => {{
-      const panelId = id === 'all' ? 'panel-all' : `panel-${{id}}`;
+      let panelId;
+      if (id === 'all') panelId = 'panel-all';
+      else if (id === 'masquerade') panelId = 'panel-masquerade';
+      else panelId = `panel-${{id}}`;
       p.classList.toggle('active', p.id === panelId);
     }});
+    // Approach 3: show/hide sub-nav
+    if (currentStyle === 3) {{
+      const subNav = document.getElementById('tabNavSub');
+      const isMasq = id === 'masquerade' || masqueradeVenues.some(v => slugify(v) === id);
+      if (subNav) subNav.classList.toggle('active', isMasq);
+    }}
+    // Approach 2: close dropdown and update parent active state
+    if (currentStyle === 2) {{
+      const dd = document.getElementById('masqDropdown');
+      if (dd) dd.classList.remove('open');
+      masqDropdownOpen = false;
+      const masqParent = document.querySelector('.masq-parent');
+      if (masqParent) {{
+        masqParent.classList.toggle('active', masqueradeVenues.some(v => slugify(v) === id));
+      }}
+    }}
   }}
+
+  // ── Helper: make a tab button ──
+  function makeTabBtn(id, label, count, isActive) {{
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'tab-btn' + (isActive ? ' active' : '');
+    btn.dataset.tab = id;
+    btn.innerHTML = `${{escHtml(label)}}<span class="tab-count">${{count}}</span>`;
+    btn.addEventListener('click', () => switchTab(id));
+    return btn;
+  }}
+
+  // ── Helper: shorten Masquerade stage label ──
+  function shortMasqLabel(v) {{
+    return v.replace(/ at The Masquerade$/, '').replace(/^Other Location /, 'Other · ');
+  }}
+
+  // ── Helper: make style switcher element ──
+  function makeStyleSwitcher() {{
+    const wrap = document.createElement('div');
+    wrap.className = 'nav-style-switcher';
+    const labels = ['Grouped', 'Dropdown', 'Two-tier'];
+    [1, 2, 3].forEach(n => {{
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'nav-style-btn' + (n === currentStyle ? ' active' : '');
+      btn.textContent = n;
+      btn.title = labels[n - 1];
+      btn.addEventListener('click', e => {{ e.stopPropagation(); setNavStyle(n); }});
+      wrap.appendChild(btn);
+    }});
+    return wrap;
+  }}
+
+  // ── Render approach 1: grouped tabs with separator ──
+  function renderNav1() {{
+    tabNav.innerHTML = '';
+    tabNav.appendChild(makeTabBtn('all', 'All Venues', Object.values(VENUES).reduce((a,v) => a + v.length, 0), true));
+    otherVenues.forEach(v => tabNav.appendChild(makeTabBtn(slugify(v), v, (VENUES[v] || []).length, false)));
+    if (masqueradeVenues.length > 0) {{
+      const sep = document.createElement('div');
+      sep.className = 'tab-group-sep';
+      sep.textContent = 'The Masquerade';
+      tabNav.appendChild(sep);
+      masqueradeVenues.forEach(v => tabNav.appendChild(makeTabBtn(slugify(v), shortMasqLabel(v), (VENUES[v] || []).length, false)));
+    }}
+    tabNav.appendChild(makeStyleSwitcher());
+  }}
+
+  // ── Render approach 2: dropdown for Masquerade ──
+  function renderNav2() {{
+    tabNav.innerHTML = '';
+    tabNav.appendChild(makeTabBtn('all', 'All Venues', Object.values(VENUES).reduce((a,v) => a + v.length, 0), true));
+    otherVenues.forEach(v => tabNav.appendChild(makeTabBtn(slugify(v), v, (VENUES[v] || []).length, false)));
+    if (masqueradeVenues.length > 0) {{
+      const wrap = document.createElement('div');
+      wrap.className = 'masq-dropdown-wrap';
+      const trigger = document.createElement('button');
+      trigger.type = 'button';
+      trigger.className = 'tab-btn masq-parent';
+      trigger.dataset.tab = 'masquerade-trigger';
+      trigger.innerHTML = `The Masquerade<span class="tab-count">${{masqTotalCount}}</span>`;
+      const dropdown = document.createElement('div');
+      dropdown.className = 'masq-dropdown';
+      dropdown.id = 'masqDropdown';
+      masqueradeVenues.forEach(v => {{
+        const btn = makeTabBtn(slugify(v), shortMasqLabel(v), (VENUES[v] || []).length, false);
+        btn.addEventListener('click', e => e.stopPropagation(), true);
+        dropdown.appendChild(btn);
+      }});
+      trigger.addEventListener('click', e => {{
+        e.stopPropagation();
+        masqDropdownOpen = !masqDropdownOpen;
+        dropdown.classList.toggle('open', masqDropdownOpen);
+      }});
+      document.addEventListener('click', () => {{
+        masqDropdownOpen = false;
+        dropdown.classList.remove('open');
+      }});
+      wrap.appendChild(trigger);
+      wrap.appendChild(dropdown);
+      tabNav.appendChild(wrap);
+    }}
+    tabNav.appendChild(makeStyleSwitcher());
+  }}
+
+  // ── Render approach 3: two-tier nav ──
+  function renderNav3() {{
+    tabNav.innerHTML = '';
+    const subNav = document.getElementById('tabNavSub');
+    subNav.innerHTML = '';
+    tabNav.appendChild(makeTabBtn('all', 'All Venues', Object.values(VENUES).reduce((a,v) => a + v.length, 0), true));
+    otherVenues.forEach(v => tabNav.appendChild(makeTabBtn(slugify(v), v, (VENUES[v] || []).length, false)));
+    if (masqueradeVenues.length > 0) {{
+      tabNav.appendChild(makeTabBtn('masquerade', 'The Masquerade', masqTotalCount, false));
+      masqueradeVenues.forEach(v => subNav.appendChild(makeTabBtn(slugify(v), shortMasqLabel(v), (VENUES[v] || []).length, false)));
+    }}
+    tabNav.appendChild(makeStyleSwitcher());
+  }}
+
+  // ── Set nav style ──
+  function setNavStyle(n) {{
+    currentStyle = n;
+    masqDropdownOpen = false;
+    const subNav = document.getElementById('tabNavSub');
+    if (subNav) subNav.classList.remove('active');
+    if (n === 1) renderNav1();
+    else if (n === 2) renderNav2();
+    else renderNav3();
+    // Re-apply active state based on visible panel
+    const activePanel = document.querySelector('.venue-panel.active');
+    if (activePanel) {{
+      const tabId = activePanel.id === 'panel-all' ? 'all'
+                  : activePanel.id === 'panel-masquerade' ? 'masquerade'
+                  : activePanel.id.replace(/^panel-/, '');
+      document.querySelectorAll('.tab-btn').forEach(b => b.classList.toggle('active', b.dataset.tab === tabId));
+      if (n === 3 && subNav) {{
+        const isMasq = tabId === 'masquerade' || masqueradeVenues.some(v => slugify(v) === tabId);
+        subNav.classList.toggle('active', isMasq);
+      }}
+      if (n === 2) {{
+        const masqParent = document.querySelector('.masq-parent');
+        if (masqParent) masqParent.classList.toggle('active', masqueradeVenues.some(v => slugify(v) === tabId));
+      }}
+    }}
+  }}
+
+  // ── Initial render ──
+  const firstPanel = document.getElementById('panel-all');
+  if (firstPanel) firstPanel.classList.add('active');
+  renderNav1();
 }})();
 </script>
 </body>
