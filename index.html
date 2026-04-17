@@ -9198,7 +9198,15 @@
     if (events.length === 0) {
       el.innerHTML = '<div class="empty-state">No upcoming events.</div>';
     } else {
-      el.innerHTML = buildTable(events);
+      el.innerHTML = `
+        <div class="venue-heading">
+          <div>
+            <div class="venue-name">${escHtml(venue)}</div>
+            <div class="venue-event-count">${events.length} upcoming</div>
+          </div>
+        </div>
+        ${buildTable(events)}
+      `;
     }
     return el;
   }
@@ -9279,6 +9287,7 @@
       if (!events || events.length === 0) return;
       const section = document.createElement('div');
       section.className = 'venue-section';
+      section.id = `masq-section-${slugify(venue)}`;
       section.innerHTML = `
         <div class="venue-heading">
           <div>
@@ -9305,12 +9314,14 @@
   let masqDropdownOpen = false;
 
   function switchTab(id) {
+    const isMasqStage = id !== 'masquerade' && masqueradeVenues.some(v => slugify(v) === id);
+    const resolvedId = isMasqStage ? 'masquerade' : id;
     document.querySelectorAll('.tab-btn').forEach(b => b.classList.toggle('active', b.dataset.tab === id));
     document.querySelectorAll('.venue-panel').forEach(p => {
       let panelId;
-      if (id === 'all') panelId = 'panel-all';
-      else if (id === 'masquerade') panelId = 'panel-masquerade';
-      else panelId = `panel-${id}`;
+      if (resolvedId === 'all') panelId = 'panel-all';
+      else if (resolvedId === 'masquerade') panelId = 'panel-masquerade';
+      else panelId = `panel-${resolvedId}`;
       p.classList.toggle('active', p.id === panelId);
     });
     // Close dropdown and update parent active state
@@ -9319,7 +9330,13 @@
     masqDropdownOpen = false;
     const masqParent = document.querySelector('.masq-parent');
     if (masqParent) {
-      masqParent.classList.toggle('active', masqueradeVenues.some(v => slugify(v) === id));
+      masqParent.classList.toggle('active', isMasqStage || id === 'masquerade');
+    }
+    if (isMasqStage) {
+      requestAnimationFrame(() => {
+        const section = document.getElementById(`masq-section-${id}`);
+        if (section) section.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      });
     }
   }
 
