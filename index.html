@@ -286,6 +286,7 @@
   /* ─── Venue Section (within ALL panel) ─── */
   .venue-section {
     margin-bottom: 48px;
+    scroll-margin-top: 80px;
   }
 
   .venue-heading {
@@ -9333,10 +9334,10 @@
       masqParent.classList.toggle('active', isMasqStage || id === 'masquerade');
     }
     if (isMasqStage) {
-      requestAnimationFrame(() => {
+      requestAnimationFrame(() => requestAnimationFrame(() => {
         const section = document.getElementById(`masq-section-${id}`);
         if (section) section.scrollIntoView({ behavior: 'smooth', block: 'start' });
-      });
+      }));
     }
   }
 
@@ -9374,7 +9375,7 @@
       dropdown.id = 'masqDropdown';
       masqueradeVenues.forEach(v => {
         const btn = makeTabBtn(slugify(v), shortMasqLabel(v), (VENUES[v] || []).length, false);
-        btn.addEventListener('click', e => e.stopPropagation(), true);
+        btn.addEventListener('click', e => e.stopPropagation());
         dropdown.appendChild(btn);
       });
       trigger.addEventListener('click', e => {
