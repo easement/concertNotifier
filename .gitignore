@@ -39,3 +39,6 @@ scraper.log
 *.swp
 *.swo
 *~
+
+# TODO list
+TODO.md
