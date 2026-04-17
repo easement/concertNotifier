@@ -10,6 +10,7 @@ Requires: pip install playwright beautifulsoup4
 import asyncio
 import hashlib
 import json
+import os
 import smtplib
 import sqlite3
 import re
@@ -21,7 +22,10 @@ from pathlib import Path
 from typing import Optional
 
 from bs4 import BeautifulSoup
+from dotenv import load_dotenv
 from playwright.async_api import async_playwright, Page
+
+load_dotenv()
 
 
 # ─── Data Model ───────────────────────────────────────────────────────────────
@@ -54,10 +58,15 @@ class Event:
 # ─── Database ─────────────────────────────────────────────────────────────────
 
 DB_PATH = Path(__file__).parent / "concerts.db"
+SUPABASE_DB_URL = os.getenv("SUPABASE_DB_URL")
 
-def init_db():
-    conn = sqlite3.connect(DB_PATH)
-    conn.execute("""
+def init_db() -> list[tuple]:
+    """Open all configured databases and return a list of (conn, backend) pairs.
+    SQLite is always first and is the primary source of truth for new-event detection."""
+    connections = []
+
+    sqlite_conn = sqlite3.connect(DB_PATH)
+    sqlite_conn.execute("""
         CREATE TABLE IF NOT EXISTS events (
             hash        TEXT PRIMARY KEY,
             venue       TEXT,
@@ -73,41 +82,92 @@ def init_db():
             last_seen   TEXT
         )
     """)
-    conn.commit()
-    return conn
+    sqlite_conn.commit()
+    connections.append((sqlite_conn, "sqlite"))
 
-def upsert_events(conn: sqlite3.Connection, events: list[Event]) -> list[Event]:
-    """Insert new events, update last_seen for existing ones. Returns list of NEW events."""
-    now = datetime.now().isoformat()
+    if SUPABASE_DB_URL:
+        try:
+            import psycopg
+        except ImportError as exc:
+            raise RuntimeError(
+                "SUPABASE_DB_URL is set but psycopg is not installed. "
+                "Run: pip install psycopg[binary]"
+            ) from exc
+
+        pg_conn = psycopg.connect(SUPABASE_DB_URL)
+        pg_conn.execute("""
+            CREATE TABLE IF NOT EXISTS public.events (
+                hash        TEXT PRIMARY KEY,
+                venue       TEXT,
+                artist      TEXT,
+                date_text   TEXT,
+                date_parsed DATE,
+                doors       TEXT,
+                show_time   TEXT,
+                price       TEXT,
+                ticket_url  TEXT,
+                detail_url  TEXT,
+                first_seen  TIMESTAMPTZ,
+                last_seen   TIMESTAMPTZ
+            )
+        """)
+        pg_conn.commit()
+        connections.append((pg_conn, "postgres"))
+
+    return connections
+
+def upsert_events(connections: list[tuple], events: list[Event]) -> list[Event]:
+    """Insert new events, update last_seen for existing ones. Returns list of NEW events.
+    Writes to all connections; newness is determined by the primary (SQLite) connection."""
+    now = datetime.now()
     new_events = []
+    primary_backend = connections[0][1]
 
     for e in events:
-        existing = conn.execute("SELECT hash FROM events WHERE hash = ?", (e.hash,)).fetchone()
-        if existing:
-            conn.execute("UPDATE events SET last_seen = ? WHERE hash = ?", (now, e.hash))
-        else:
-            conn.execute(
-                """INSERT INTO events
-                   (hash, venue, artist, date_text, date_parsed, doors, show_time,
-                    price, ticket_url, detail_url, first_seen, last_seen)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                (e.hash, e.venue, e.artist, e.date_text, e.date_parsed,
-                 e.doors, e.show_time, e.price, e.ticket_url, e.detail_url, now, now)
-            )
+        is_new_in_primary = False
+
+        for conn, backend in connections:
+            ph = "%s" if backend == "postgres" else "?"
+            ts = now if backend == "postgres" else now.isoformat()
+
+            existing = conn.execute(f"SELECT hash FROM events WHERE hash = {ph}", (e.hash,)).fetchone()
+
+            if existing:
+                conn.execute(f"UPDATE events SET last_seen = {ph} WHERE hash = {ph}", (ts, e.hash))
+            else:
+                conn.execute(
+                    f"""INSERT INTO events
+                        (hash, venue, artist, date_text, date_parsed, doors, show_time,
+                         price, ticket_url, detail_url, first_seen, last_seen)
+                        VALUES ({ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph})""",
+                    (e.hash, e.venue, e.artist, e.date_text, e.date_parsed,
+                     e.doors, e.show_time, e.price, e.ticket_url, e.detail_url, ts, ts)
+                )
+                if backend == primary_backend:
+                    is_new_in_primary = True
+
+        if is_new_in_primary:
             new_events.append(e)
 
-    conn.commit()
+    for conn, _ in connections:
+        conn.commit()
+
     return new_events
 
 
-def cleanup_past_events(conn: sqlite3.Connection) -> int:
-    """Delete events whose parsed date is in the past. Returns count deleted."""
+def cleanup_past_events(connections: list[tuple]) -> int:
+    """Delete events whose parsed date is in the past from all connections. Returns primary count."""
     today = datetime.now().strftime("%Y-%m-%d")
-    cursor = conn.execute(
-        "DELETE FROM events WHERE date_parsed IS NOT NULL AND date_parsed < ?", (today,)
-    )
-    conn.commit()
-    return cursor.rowcount
+    deleted = 0
+    for conn, backend in connections:
+        ph = "%s" if backend == "postgres" else "?"
+        cursor = conn.execute(
+            f"DELETE FROM events WHERE date_parsed IS NOT NULL AND date_parsed < {ph}", (today,)
+        )
+        conn.commit()
+        if backend == connections[0][1]:
+            deleted = cursor.rowcount
+    return deleted
 
 
 # ─── Browser Helpers ──────────────────────────────────────────────────────────
@@ -1211,7 +1271,7 @@ async def run_scraper():
     print(f"  Atlanta Concert Scraper — {datetime.now().strftime('%Y-%m-%d %H:%M')}")
     print(f"{'='*60}\n")
 
-    conn = init_db()
+    connections = init_db()
     all_events = []
     all_new = []
 
@@ -1324,8 +1384,8 @@ async def run_scraper():
 
     # Detect new events
     print(f"\nComparing with database to detect new events...")
-    all_new = upsert_events(conn, all_events)
-    deleted = cleanup_past_events(conn)
+    all_new = upsert_events(connections, all_events)
+    deleted = cleanup_past_events(connections)
     print(f"Database updated! ({deleted} past events removed)")
 
     # Send email if there are new events
@@ -1355,7 +1415,8 @@ async def run_scraper():
     else:
         print("No new shows since last run.\n")
 
-    conn.close()
+    for conn, _ in connections:
+        conn.close()
     return all_new
 
 

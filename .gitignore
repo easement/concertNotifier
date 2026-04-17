@@ -3,6 +3,7 @@ config.json
 
 # Database
 concerts.db
+sql/
 
 # Python
 __pycache__/
@@ -16,6 +17,7 @@ venv/
 env/
 ENV/
 .venv
+.env
 
 # Testing
 .pytest_cache/
