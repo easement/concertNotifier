@@ -9,6 +9,7 @@ from datetime import date, datetime
 
 DB_PATH = os.path.join(os.path.dirname(__file__), "concerts.db")
 OUTPUT_PATH = os.path.join(os.path.dirname(__file__), "events.html")
+CALENDAR_PATH = os.path.join(os.path.dirname(__file__), "calendar.html")
 
 
 def _parse_date_from_text(text: str) -> tuple[str | None, str | None]:
@@ -205,6 +206,21 @@ def generate_html(venues: dict[str, list[dict]]) -> str:
     color: var(--gray);
     flex-shrink: 0;
   }}
+
+  .view-toggle {{
+    font-family: var(--font-mono);
+    font-size: 0.68rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--gray-dim);
+    text-decoration: none;
+    border: 1px solid var(--gray-dim);
+    padding: 4px 10px;
+    border-radius: 3px;
+    transition: color 0.15s, border-color 0.15s;
+    flex-shrink: 0;
+  }}
+  .view-toggle:hover {{ color: var(--white); border-color: var(--gray); }}
 
   /* ─── Search ─── */
   .search-wrap {{
@@ -582,6 +598,7 @@ def generate_html(venues: dict[str, list[dict]]) -> str:
       <button type="button" id="searchClear" class="search-clear" aria-label="Clear search">✕</button>
     </div>
     <div class="header-count" id="header-count">{total_events} shows</div>
+    <a class="view-toggle" href="calendar.html">Calendar</a>
   </div>
 </header>
 
@@ -918,6 +935,479 @@ def generate_html(venues: dict[str, list[dict]]) -> str:
 """
 
 
+def generate_calendar_html(venues: dict[str, list[dict]]) -> str:
+    today_iso = date.today().isoformat()
+    generated_at = datetime.now().strftime("%B %d, %Y at %I:%M %p")
+
+    # Flatten all events, attaching venue name, then sort by date
+    all_events: list[dict] = []
+    for venue_name, events in venues.items():
+        for e in events:
+            all_events.append({**e, "venue": venue_name})
+
+    all_events.sort(key=lambda e: (
+        e["date_parsed"] == "" or e["date_parsed"] is None,
+        e["date_parsed"] or "",
+        e["artist"].lower(),
+    ))
+
+    # Group by date_parsed (or "" for TBA)
+    from itertools import groupby
+    grouped: list[tuple[str, list[dict]]] = []
+    for date_key, group in groupby(all_events, key=lambda e: e["date_parsed"] or ""):
+        grouped.append((date_key, list(group)))
+
+    total_events = len(all_events)
+
+    # Pre-build date section HTML
+    date_sections_html = ""
+    for date_key, events in grouped:
+        if date_key:
+            y, m, d_ = date_key.split("-")
+            dt_local = f"{int(y)},{int(m)-1},{int(d_)}"
+            is_today = date_key == today_iso
+            today_badge = '<span class="today-badge">Today</span>' if is_today else ""
+            # date heading rendered via JS formatDate equivalent in Python
+            from datetime import date as date_cls
+            d_obj = date_cls(int(y), int(m), int(d_))
+            dow = ["Sun", "Mon", "Tue", "Wed", "Thurs", "Fri", "Sat"][d_obj.weekday() if d_obj.weekday() != 6 else 6]
+            # Python weekday: Mon=0..Sun=6 → JS: Sun=0..Sat=6
+            js_days = ["Mon", "Tue", "Wed", "Thurs", "Fri", "Sat", "Sun"]
+            dow = js_days[d_obj.weekday()]
+            month_names = ["January", "February", "March", "April", "May", "June",
+                           "July", "August", "September", "October", "November", "December"]
+            date_label = f"({dow}) {month_names[d_obj.month - 1]} {d_obj.day}"
+        else:
+            date_label = "Date TBA"
+            is_today = False
+            today_badge = ""
+
+        row_class = "is-today" if is_today else ""
+
+        rows_html = ""
+        for e in events:
+            artist = e["artist"].replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+            venue_display = e["venue"].replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+            if e.get("ticket_url"):
+                url = e["ticket_url"].replace('"', "&quot;")
+                link_html = f'<a class="ticket-link" href="{url}" target="_blank" rel="noopener">Tickets</a>'
+            elif e.get("detail_url"):
+                url = e["detail_url"].replace('"', "&quot;")
+                link_html = f'<a class="ticket-link" href="{url}" target="_blank" rel="noopener">Info</a>'
+            else:
+                link_html = ""
+            rows_html += f"""<tr class="{row_class}">
+        <td class="td-artist">{artist}</td>
+        <td class="td-venue">{venue_display}</td>
+        <td class="td-link">{link_html}</td>
+      </tr>"""
+
+        date_sections_html += f"""
+  <div class="date-section" data-date="{date_key}">
+    <div class="date-heading">
+      <div class="date-label">{date_label}{today_badge}</div>
+      <div class="date-event-count">{len(events)} show{"s" if len(events) != 1 else ""}</div>
+    </div>
+    <table class="events-table">
+      <thead>
+        <tr>
+          <th>Artist / Event</th>
+          <th>Venue</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>{rows_html}</tbody>
+    </table>
+  </div>"""
+
+    return f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Atlanta Shows — Calendar</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;1,9..40,300&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root {{
+    --navy:       #1a1a2e;
+    --navy-deep:  #12122a;
+    --navy-mid:   #232340;
+    --navy-card:  #1e1e38;
+    --coral:      #e94560;
+    --coral-dim:  #b8304a;
+    --coral-glow: rgba(233,69,96,0.18);
+    --white:      #f2f0ee;
+    --gray:       #9494aa;
+    --gray-dim:   #5c5c78;
+    --border:     rgba(255,255,255,0.07);
+    --font-display: 'Bebas Neue', sans-serif;
+    --font-body:    'DM Sans', sans-serif;
+    --font-mono:    'DM Mono', monospace;
+  }}
+
+  *, *::before, *::after {{ box-sizing: border-box; margin: 0; padding: 0; }}
+  html {{ scroll-behavior: smooth; }}
+
+  body {{
+    background-color: var(--navy-deep);
+    color: var(--white);
+    font-family: var(--font-body);
+    min-height: 100vh;
+    background-image:
+      url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='300' height='300'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.75' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='300' height='300' filter='url(%23n)' opacity='0.035'/%3E%3C/svg%3E");
+  }}
+
+  /* ─── Header ─── */
+  .site-header {{
+    position: sticky;
+    top: 0;
+    z-index: 100;
+    background: var(--navy-deep);
+    border-bottom: 1px solid var(--border);
+    backdrop-filter: blur(12px);
+  }}
+
+  .header-inner {{
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 0 24px;
+    display: flex;
+    align-items: baseline;
+    gap: 20px;
+    height: 64px;
+  }}
+
+  .site-title {{
+    font-family: var(--font-display);
+    font-size: 2rem;
+    letter-spacing: 0.06em;
+    color: var(--white);
+    line-height: 1;
+    flex-shrink: 0;
+    text-decoration: none;
+  }}
+  .site-title span {{ color: var(--coral); }}
+
+  .header-meta {{
+    font-family: var(--font-mono);
+    font-size: 0.68rem;
+    color: var(--gray-dim);
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    padding-bottom: 2px;
+  }}
+
+  .header-count {{
+    font-family: var(--font-mono);
+    font-size: 0.72rem;
+    color: var(--gray);
+    flex-shrink: 0;
+  }}
+
+  .view-toggle {{
+    font-family: var(--font-mono);
+    font-size: 0.68rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--gray-dim);
+    text-decoration: none;
+    border: 1px solid var(--gray-dim);
+    padding: 4px 10px;
+    border-radius: 3px;
+    transition: color 0.15s, border-color 0.15s;
+    flex-shrink: 0;
+  }}
+  .view-toggle:hover {{ color: var(--white); border-color: var(--gray); }}
+
+  /* ─── Search ─── */
+  .search-wrap {{
+    width: 240px;
+    margin-left: auto;
+    margin-right: 16px;
+    position: relative;
+    display: flex;
+    align-items: center;
+    flex-shrink: 0;
+  }}
+  .search-input {{
+    width: 100%;
+    background: var(--navy-mid);
+    border: 1px solid var(--border);
+    border-radius: 20px;
+    padding: 7px 30px 7px 14px;
+    font-family: var(--font-body);
+    font-size: 0.8rem;
+    color: var(--white);
+    outline: none;
+    transition: border-color 0.18s, background 0.18s;
+    -webkit-appearance: none;
+  }}
+  .search-input::placeholder {{ color: var(--gray-dim); }}
+  .search-input:focus {{
+    border-color: var(--gray-dim);
+    background: var(--navy-card);
+  }}
+  .search-input::-webkit-search-cancel-button {{ display: none; }}
+  .search-clear {{
+    position: absolute;
+    right: 10px;
+    background: none;
+    border: none;
+    color: var(--gray-dim);
+    cursor: pointer;
+    font-size: 0.68rem;
+    line-height: 1;
+    padding: 2px 4px;
+    display: none;
+    transition: color 0.15s;
+  }}
+  .search-clear:hover {{ color: var(--white); }}
+  .search-clear.visible {{ display: block; }}
+
+  /* ─── Main ─── */
+  .main {{
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 32px 24px 80px;
+  }}
+
+  /* ─── Date Section ─── */
+  .date-section {{
+    margin-bottom: 48px;
+  }}
+  .date-section.hidden {{ display: none; }}
+
+  .date-heading {{
+    display: flex;
+    align-items: baseline;
+    gap: 14px;
+    margin-bottom: 4px;
+    padding-bottom: 10px;
+    border-bottom: 2px solid var(--coral);
+  }}
+
+  .date-label {{
+    font-family: var(--font-display);
+    font-size: 1.65rem;
+    letter-spacing: 0.05em;
+    color: var(--white);
+    line-height: 1;
+  }}
+
+  .date-event-count {{
+    font-family: var(--font-mono);
+    font-size: 0.7rem;
+    color: var(--gray);
+    letter-spacing: 0.08em;
+  }}
+
+  /* ─── Today badge ─── */
+  .today-badge {{
+    display: inline-block;
+    background: var(--coral);
+    color: #fff;
+    font-family: var(--font-mono);
+    font-size: 0.6rem;
+    font-weight: 500;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    padding: 2px 6px;
+    border-radius: 3px;
+    margin-left: 10px;
+    vertical-align: middle;
+    position: relative;
+    top: -3px;
+  }}
+
+  /* ─── Event Table ─── */
+  .events-table {{
+    width: 100%;
+    border-collapse: collapse;
+    margin-top: 2px;
+  }}
+
+  .events-table thead th {{
+    font-family: var(--font-mono);
+    font-size: 0.62rem;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--gray-dim);
+    padding: 10px 12px 8px;
+    text-align: left;
+    border-bottom: 1px solid var(--border);
+    font-weight: 400;
+  }}
+  .events-table thead th:last-child {{ text-align: right; }}
+
+  .events-table tbody tr {{
+    border-bottom: 1px solid var(--border);
+    transition: background 0.14s;
+    cursor: default;
+  }}
+  .events-table tbody tr:hover {{ background: rgba(255,255,255,0.03); }}
+  .events-table tbody tr.is-today {{ background: rgba(233,69,96,0.06); }}
+  .events-table tbody tr.is-today:hover {{ background: rgba(233,69,96,0.1); }}
+
+  .events-table td {{
+    padding: 13px 12px;
+    vertical-align: middle;
+  }}
+
+  .td-artist {{
+    font-size: 0.95rem;
+    font-weight: 500;
+    color: var(--white);
+    width: 45%;
+  }}
+
+  .td-venue {{
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+    color: var(--gray);
+    width: 45%;
+  }}
+
+  .td-link {{
+    text-align: right;
+    width: 10%;
+    white-space: nowrap;
+  }}
+
+  .ticket-link {{
+    display: inline-block;
+    font-family: var(--font-mono);
+    font-size: 0.65rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--coral);
+    text-decoration: none;
+    border: 1px solid var(--coral-dim);
+    padding: 4px 10px;
+    border-radius: 3px;
+    transition: background 0.15s, color 0.15s;
+    white-space: nowrap;
+  }}
+  .ticket-link:hover {{
+    background: var(--coral);
+    color: #fff;
+    border-color: var(--coral);
+  }}
+
+  /* ─── Empty / search-empty ─── */
+  .empty-state, .search-empty {{
+    padding: 60px 0;
+    text-align: center;
+    color: var(--gray-dim);
+    font-family: var(--font-mono);
+    font-size: 0.8rem;
+    letter-spacing: 0.08em;
+  }}
+
+  /* ─── Footer ─── */
+  .site-footer {{
+    text-align: center;
+    padding: 40px 24px;
+    font-family: var(--font-mono);
+    font-size: 0.65rem;
+    letter-spacing: 0.1em;
+    color: var(--gray-dim);
+    border-top: 1px solid var(--border);
+    text-transform: uppercase;
+  }}
+
+  /* ─── Responsive ─── */
+  @media (max-width: 680px) {{
+    .site-title {{ font-size: 1.5rem; }}
+    .header-count {{ display: none; }}
+    .search-wrap {{ width: 160px; margin-right: 8px; }}
+    .date-label {{ font-size: 1.3rem; }}
+    .view-toggle {{ display: none; }}
+  }}
+</style>
+</head>
+<body>
+
+<header class="site-header">
+  <div class="header-inner">
+    <a class="site-title" href="events.html">Atlanta<span>&nbsp;Shows</span></a>
+    <div class="header-meta">Calendar view</div>
+    <div class="search-wrap">
+      <input type="search" id="eventSearch" class="search-input"
+             placeholder="Search artists…" autocomplete="off" spellcheck="false" aria-label="Search artists">
+      <button type="button" id="searchClear" class="search-clear" aria-label="Clear search">✕</button>
+    </div>
+    <div class="header-count" id="header-count">{total_events} shows</div>
+    <a class="view-toggle" href="events.html">By Venue</a>
+  </div>
+</header>
+
+<main class="main" id="mainContent">
+{date_sections_html}
+  <div id="searchEmpty" class="search-empty" style="display:none"></div>
+</main>
+
+<footer class="site-footer">
+  Atlanta Concert Scraper &nbsp;·&nbsp; Generated {generated_at}
+</footer>
+
+<script>
+(function () {{
+  const searchInput = document.getElementById('eventSearch');
+  const searchClear = document.getElementById('searchClear');
+  const headerCount = document.getElementById('header-count');
+  const searchEmpty = document.getElementById('searchEmpty');
+  const totalShows = {total_events};
+  const sections = Array.from(document.querySelectorAll('.date-section'));
+
+  function doSearch(query) {{
+    const q = query.trim().toLowerCase();
+    searchClear.classList.toggle('visible', query.length > 0);
+
+    if (!q) {{
+      sections.forEach(s => {{
+        s.classList.remove('hidden');
+        s.querySelectorAll('tbody tr').forEach(r => r.style.display = '');
+      }});
+      headerCount.textContent = totalShows + ' shows';
+      searchEmpty.style.display = 'none';
+      return;
+    }}
+
+    let matchCount = 0;
+    sections.forEach(s => {{
+      let sectionHits = 0;
+      s.querySelectorAll('tbody tr').forEach(r => {{
+        const artist = (r.querySelector('.td-artist') || {{}}).textContent || '';
+        const matches = artist.toLowerCase().includes(q);
+        r.style.display = matches ? '' : 'none';
+        if (matches) sectionHits++;
+      }});
+      matchCount += sectionHits;
+      s.classList.toggle('hidden', sectionHits === 0);
+    }});
+
+    headerCount.textContent = matchCount + (matchCount === 1 ? ' match' : ' matches');
+    searchEmpty.style.display = matchCount === 0 ? 'block' : 'none';
+    if (matchCount === 0) {{
+      const esc = query.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+      searchEmpty.innerHTML = 'No results for &ldquo;' + esc + '&rdquo;';
+    }}
+  }}
+
+  searchInput.addEventListener('input', e => doSearch(e.target.value));
+  searchClear.addEventListener('click', () => {{ searchInput.value = ''; doSearch(''); searchInput.focus(); }});
+  searchInput.addEventListener('keydown', e => {{
+    if (e.key === 'Escape') {{ searchInput.value = ''; doSearch(''); searchInput.blur(); }}
+  }});
+}})();
+</script>
+</body>
+</html>
+"""
+
+
 def main():
     print("Reading concerts.db…")
     venues = get_upcoming_events()
@@ -928,6 +1418,11 @@ def main():
     with open(OUTPUT_PATH, "w", encoding="utf-8") as f:
         f.write(html)
     print(f"Written → {OUTPUT_PATH}")
+
+    calendar = generate_calendar_html(venues)
+    with open(CALENDAR_PATH, "w", encoding="utf-8") as f:
+        f.write(calendar)
+    print(f"Written → {CALENDAR_PATH}")
 
 
 if __name__ == "__main__":
