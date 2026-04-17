@@ -1107,12 +1107,19 @@ def format_display_date(event: Event) -> str:
 
 # ─── Config ───────────────────────────────────────────────────────────────────
 
-CONFIG_PATH = Path(__file__).parent / "config.json"
-
 def load_config() -> dict:
-    if CONFIG_PATH.exists():
-        return json.loads(CONFIG_PATH.read_text())
-    return {}
+    recipients_raw = os.environ.get("EMAIL_RECIPIENTS", "")
+    recipients = [r.strip() for r in recipients_raw.split(",") if r.strip()]
+    return {
+        "email": {
+            "enabled": os.environ.get("EMAIL_ENABLED", "").lower() in ("1", "true", "yes"),
+            "smtp_server": os.environ.get("EMAIL_SMTP_SERVER", "smtp.gmail.com"),
+            "smtp_port": int(os.environ.get("EMAIL_SMTP_PORT", "587")),
+            "sender": os.environ.get("EMAIL_SENDER", ""),
+            "password": os.environ.get("EMAIL_PASSWORD", ""),
+            "recipients": recipients,
+        }
+    }
 
 
 # ─── Email Notification ──────────────────────────────────────────────────────
