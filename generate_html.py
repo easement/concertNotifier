@@ -6,10 +6,14 @@ import sqlite3
 import json
 import os
 from datetime import date, datetime
+from dotenv import load_dotenv
+
+load_dotenv()
 
 DB_PATH = os.path.join(os.path.dirname(__file__), "concerts.db")
 OUTPUT_PATH = os.path.join(os.path.dirname(__file__), "index.html")
 CALENDAR_PATH = os.path.join(os.path.dirname(__file__), "calendar.html")
+SUPABASE_DB_URL = os.getenv("SUPABASE_DB_URL")
 
 
 def _parse_date_from_text(text: str) -> tuple[str | None, str | None]:
@@ -74,20 +78,40 @@ def _parse_date_from_text(text: str) -> tuple[str | None, str | None]:
 
 def get_upcoming_events() -> dict[str, list[dict]]:
     today = date.today().isoformat()
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    cur = conn.cursor()
-    cur.execute(
-        """
-        SELECT venue, artist, date_text, date_parsed, show_time, price, ticket_url, detail_url
-        FROM events
-        WHERE (date_parsed >= ? OR date_parsed IS NULL OR date_parsed = '')
-        ORDER BY venue, date_parsed NULLS LAST, artist
-        """,
-        (today,),
-    )
+
+    if SUPABASE_DB_URL:
+        import psycopg
+        from psycopg.rows import dict_row
+        conn = psycopg.connect(SUPABASE_DB_URL, row_factory=dict_row)
+        cur = conn.execute(
+            """
+            SELECT venue, artist, date_text, date_parsed::text, show_time, price, ticket_url, detail_url
+            FROM events
+            WHERE (date_parsed >= %s OR date_parsed IS NULL)
+            ORDER BY venue, date_parsed NULLS LAST, artist
+            """,
+            (today,),
+        )
+        rows = cur.fetchall()
+        conn.close()
+    else:
+        conn = sqlite3.connect(DB_PATH)
+        conn.row_factory = sqlite3.Row
+        cur = conn.cursor()
+        cur.execute(
+            """
+            SELECT venue, artist, date_text, date_parsed, show_time, price, ticket_url, detail_url
+            FROM events
+            WHERE (date_parsed >= ? OR date_parsed IS NULL OR date_parsed = '')
+            ORDER BY venue, date_parsed NULLS LAST, artist
+            """,
+            (today,),
+        )
+        rows = cur.fetchall()
+        conn.close()
+
     venues: dict[str, list[dict]] = {}
-    for row in cur.fetchall():
+    for row in rows:
         venue = row["venue"]
         date_parsed = row["date_parsed"] or ""
         show_time = row["show_time"] or ""
@@ -107,7 +131,6 @@ def get_upcoming_events() -> dict[str, list[dict]]:
                 "detail_url": row["detail_url"] or "",
             }
         )
-    conn.close()
     return venues
 
 
