@@ -1,9 +1,9 @@
 """
 Atlanta Concert Scraper
 Scrapes event pages from local ATL venues, detects new shows,
-and stores results in SQLite for change tracking.
+and stores results in Supabase/PostgreSQL for change tracking.
 
-Requires: pip install playwright beautifulsoup4
+Requires: pip install playwright beautifulsoup4 psycopg[binary]
            playwright install chromium
 """
 
@@ -12,7 +12,6 @@ import hashlib
 import json
 import os
 import smtplib
-import sqlite3
 import re
 from datetime import datetime, date
 from dataclasses import dataclass, asdict
@@ -57,43 +56,16 @@ class Event:
 
 # ─── Database ─────────────────────────────────────────────────────────────────
 
-DB_PATH = Path(__file__).parent / "concerts.db"
 SUPABASE_DB_URL = os.getenv("SUPABASE_DB_URL")
 
-def init_db() -> tuple:
-    """Open the database and return a (conn, backend) pair.
-    Uses Supabase/PostgreSQL when SUPABASE_DB_URL is set, SQLite otherwise."""
-    if SUPABASE_DB_URL:
-        try:
-            import psycopg
-        except ImportError as exc:
-            raise RuntimeError(
-                "SUPABASE_DB_URL is set but psycopg is not installed. "
-                "Run: pip install psycopg[binary]"
-            ) from exc
-        conn = psycopg.connect(SUPABASE_DB_URL)
-        conn.execute("""
-            CREATE TABLE IF NOT EXISTS public.events (
-                hash        TEXT PRIMARY KEY,
-                venue       TEXT,
-                artist      TEXT,
-                date_text   TEXT,
-                date_parsed TEXT,
-                doors       TEXT,
-                show_time   TEXT,
-                price       TEXT,
-                ticket_url  TEXT,
-                detail_url  TEXT,
-                first_seen  TIMESTAMPTZ,
-                last_seen   TIMESTAMPTZ
-            )
-        """)
-        conn.commit()
-        return conn, "postgres"
-
-    sqlite_conn = sqlite3.connect(DB_PATH)
-    sqlite_conn.execute("""
-        CREATE TABLE IF NOT EXISTS events (
+def init_db():
+    """Connect to Supabase/PostgreSQL and ensure the events table exists."""
+    import psycopg
+    if not SUPABASE_DB_URL:
+        raise RuntimeError("SUPABASE_DB_URL environment variable is not set.")
+    conn = psycopg.connect(SUPABASE_DB_URL)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS public.events (
             hash        TEXT PRIMARY KEY,
             venue       TEXT,
             artist      TEXT,
@@ -104,34 +76,31 @@ def init_db() -> tuple:
             price       TEXT,
             ticket_url  TEXT,
             detail_url  TEXT,
-            first_seen  TEXT,
-            last_seen   TEXT
+            first_seen  TIMESTAMPTZ,
+            last_seen   TIMESTAMPTZ
         )
     """)
-    sqlite_conn.commit()
-    return sqlite_conn, "sqlite"
+    conn.commit()
+    return conn
 
 
-def upsert_events(connection: tuple, events: list[Event]) -> list[Event]:
+def upsert_events(conn, events: list[Event]) -> list[Event]:
     """Insert new events, update last_seen for existing ones. Returns list of NEW events."""
-    conn, backend = connection
-    ph = "%s" if backend == "postgres" else "?"
     now = datetime.now()
-    ts = now if backend == "postgres" else now.isoformat()
     new_events = []
 
     for e in events:
-        existing = conn.execute(f"SELECT hash FROM events WHERE hash = {ph}", (e.hash,)).fetchone()
+        existing = conn.execute("SELECT hash FROM events WHERE hash = %s", (e.hash,)).fetchone()
         if existing:
-            conn.execute(f"UPDATE events SET last_seen = {ph} WHERE hash = {ph}", (ts, e.hash))
+            conn.execute("UPDATE events SET last_seen = %s WHERE hash = %s", (now, e.hash))
         else:
             conn.execute(
-                f"""INSERT INTO events
+                """INSERT INTO events
                     (hash, venue, artist, date_text, date_parsed, doors, show_time,
                      price, ticket_url, detail_url, first_seen, last_seen)
-                    VALUES ({ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph})""",
+                    VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
                 (e.hash, e.venue, e.artist, e.date_text, e.date_parsed,
-                 e.doors, e.show_time, e.price, e.ticket_url, e.detail_url, ts, ts)
+                 e.doors, e.show_time, e.price, e.ticket_url, e.detail_url, now, now)
             )
             new_events.append(e)
 
@@ -139,13 +108,11 @@ def upsert_events(connection: tuple, events: list[Event]) -> list[Event]:
     return new_events
 
 
-def cleanup_past_events(connection: tuple) -> int:
+def cleanup_past_events(conn) -> int:
     """Delete events whose parsed date is in the past. Returns count deleted."""
-    conn, backend = connection
-    ph = "%s" if backend == "postgres" else "?"
     today = datetime.now().strftime("%Y-%m-%d")
     cursor = conn.execute(
-        f"DELETE FROM events WHERE date_parsed IS NOT NULL AND date_parsed < {ph}", (today,)
+        "DELETE FROM events WHERE date_parsed IS NOT NULL AND date_parsed < %s", (today,)
     )
     conn.commit()
     return cursor.rowcount
@@ -1259,7 +1226,7 @@ async def run_scraper():
     print(f"  Atlanta Concert Scraper — {datetime.now().strftime('%Y-%m-%d %H:%M')}")
     print(f"{'='*60}\n")
 
-    connection = init_db()
+    conn = init_db()
     all_events = []
     all_new = []
 
@@ -1306,8 +1273,8 @@ async def run_scraper():
 
     # Detect new events
     print(f"\nComparing with database to detect new events...")
-    all_new = upsert_events(connection, all_events)
-    deleted = cleanup_past_events(connection)
+    all_new = upsert_events(conn, all_events)
+    deleted = cleanup_past_events(conn)
     print(f"Database updated! ({deleted} past events removed)")
 
     # Send email if there are new events
@@ -1337,7 +1304,7 @@ async def run_scraper():
     else:
         print("No new shows since last run.\n")
 
-    connection[0].close()
+    conn.close()
     return all_new
 
 

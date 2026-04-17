@@ -5,8 +5,8 @@ Covers: Event model, date parsing, display formatting, email HTML,
 
 Run with: pytest test_unit.py -v
 """
+import os
 import pytest
-import sqlite3
 from unittest.mock import AsyncMock, MagicMock
 from scraper import (
     Event,
@@ -401,20 +401,30 @@ class TestBuildEmailHtml:
 
 # ─── Database ─────────────────────────────────────────────────────────────────
 
+requires_db = pytest.mark.skipif(
+    not os.getenv("SUPABASE_DB_URL"),
+    reason="SUPABASE_DB_URL not set"
+)
+
+
+@requires_db
 class TestDatabase:
     def setup_method(self):
-        self.conn = sqlite3.connect(":memory:")
+        import psycopg
+        self.conn = psycopg.connect(os.environ["SUPABASE_DB_URL"])
         self.conn.execute("""
-            CREATE TABLE events (
+            CREATE TEMP TABLE events (
                 hash TEXT PRIMARY KEY, venue TEXT, artist TEXT,
                 date_text TEXT, date_parsed TEXT, doors TEXT,
                 show_time TEXT, price TEXT, ticket_url TEXT,
-                detail_url TEXT, first_seen TEXT, last_seen TEXT
+                detail_url TEXT, first_seen TIMESTAMPTZ, last_seen TIMESTAMPTZ
             )
         """)
         self.conn.commit()
 
     def teardown_method(self):
+        self.conn.execute("DROP TABLE IF EXISTS events")
+        self.conn.commit()
         self.conn.close()
 
     def test_new_event_returned(self):
@@ -430,9 +440,9 @@ class TestDatabase:
     def test_first_seen_unchanged_on_upsert(self):
         e = make_event()
         upsert_events(self.conn, [e])
-        first = self.conn.execute("SELECT first_seen FROM events WHERE hash=?", (e.hash,)).fetchone()[0]
+        first = self.conn.execute("SELECT first_seen FROM events WHERE hash=%s", (e.hash,)).fetchone()[0]
         upsert_events(self.conn, [e])
-        second = self.conn.execute("SELECT first_seen FROM events WHERE hash=?", (e.hash,)).fetchone()[0]
+        second = self.conn.execute("SELECT first_seen FROM events WHERE hash=%s", (e.hash,)).fetchone()[0]
         assert first == second
 
     def test_all_fields_stored(self):
@@ -443,11 +453,11 @@ class TestDatabase:
             detail_url="https://venue.example.com/event",
         )
         upsert_events(self.conn, [e])
-        row = self.conn.execute("SELECT * FROM events WHERE hash=?", (e.hash,)).fetchone()
-        assert row[1] == "Fox Theatre"
-        assert row[2] == "Test Artist"
-        assert row[7] == "$30"
-        assert row[8] == "https://tickets.example.com"
+        row = self.conn.execute("SELECT venue, artist, price, ticket_url FROM events WHERE hash=%s", (e.hash,)).fetchone()
+        assert row[0] == "Fox Theatre"
+        assert row[1] == "Test Artist"
+        assert row[2] == "$30"
+        assert row[3] == "https://tickets.example.com"
 
     def test_multiple_new_events(self):
         events = [make_event(artist=f"Artist {i}", ticket_url=f"https://t.com/{i}") for i in range(5)]
@@ -465,7 +475,7 @@ class TestDatabase:
         upsert_events(self.conn, [past])
         deleted = cleanup_past_events(self.conn)
         assert deleted == 1
-        row = self.conn.execute("SELECT hash FROM events WHERE hash=?", (past.hash,)).fetchone()
+        row = self.conn.execute("SELECT hash FROM events WHERE hash=%s", (past.hash,)).fetchone()
         assert row is None
 
     def test_cleanup_keeps_future_events(self):
@@ -473,7 +483,7 @@ class TestDatabase:
         upsert_events(self.conn, [future])
         deleted = cleanup_past_events(self.conn)
         assert deleted == 0
-        row = self.conn.execute("SELECT hash FROM events WHERE hash=?", (future.hash,)).fetchone()
+        row = self.conn.execute("SELECT hash FROM events WHERE hash=%s", (future.hash,)).fetchone()
         assert row is not None
 
     def test_cleanup_keeps_events_with_no_parsed_date(self):
@@ -481,7 +491,7 @@ class TestDatabase:
         upsert_events(self.conn, [no_date])
         deleted = cleanup_past_events(self.conn)
         assert deleted == 0
-        row = self.conn.execute("SELECT hash FROM events WHERE hash=?", (no_date.hash,)).fetchone()
+        row = self.conn.execute("SELECT hash FROM events WHERE hash=%s", (no_date.hash,)).fetchone()
         assert row is not None
 
     def test_cleanup_returns_count_of_deleted(self):
