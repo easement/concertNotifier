@@ -1289,103 +1289,37 @@ async def run_scraper():
                        "AppleWebKit/537.36 (KHTML, like Gecko) "
                        "Chrome/120.0.0.0 Safari/537.36"
         )
-        page = await context.new_page()
 
-        # AEG venues
-        for venue_name, url in VENUES:
-            print(f"Scraping {venue_name}...")
+        async def run_venue(fn, *args):
+            page = await context.new_page()
             try:
-                events = await scrape_aeg_venue(page, url, venue_name)
-                print(f"  Found {len(events)} events")
-                all_events.extend(events)
+                return await fn(page, *args)
             except Exception as e:
-                print(f"  ERROR: {e}")
+                print(f"  ERROR in {fn.__name__}: {e}")
+                return []
+            finally:
+                await page.close()
 
-        # The Earl
-        print("Scraping The Earl...")
-        try:
-            events = await scrape_the_earl(page)
-            print(f"  Found {len(events)} events")
+        results = await asyncio.gather(
+            run_venue(scrape_aeg_venue, "https://www.easternatl.com/calendar/", "The Eastern"),
+            run_venue(scrape_aeg_venue, "https://www.variety-playhouse.com/calendar/", "Variety Playhouse"),
+            run_venue(scrape_aeg_venue, "https://terminalwestatl.com/calendar/", "Terminal West"),
+            run_venue(scrape_aeg_venue, "https://thebuckheadtheatre.com/shows", "Buckhead Theatre"),
+            run_venue(scrape_the_earl),
+            run_venue(scrape_goat_farm),
+            run_venue(scrape_aisle5),
+            run_venue(scrape_fox_theatre),
+            run_venue(scrape_cobb_energy),
+            run_venue(scrape_masquerade),
+            run_venue(scrape_center_stage),
+            run_venue(scrape_the_loft),
+            run_venue(scrape_vinyl),
+            run_venue(scrape_city_winery),
+            run_venue(scrape_helium_comedy_atlanta),
+        )
+
+        for events in results:
             all_events.extend(events)
-        except Exception as e:
-            print(f"  ERROR: {e}")
-
-        # The Goat Farm
-        print("Scraping The Goat Farm...")
-        try:
-            events = await scrape_goat_farm(page)
-            print(f"  Found {len(events)} events")
-            all_events.extend(events)
-        except Exception as e:
-            print(f"  ERROR: {e}")
-
-        # Aisle 5
-        print("Scraping Aisle 5...")
-        try:
-            events = await scrape_aisle5(page)
-            print(f"  Found {len(events)} events")
-            all_events.extend(events)
-        except Exception as e:
-            print(f"  ERROR: {e}")
-
-        # Fox Theatre
-        print("Scraping Fox Theatre...")
-        try:
-            events = await scrape_fox_theatre(page)
-            print(f"  Found {len(events)} events")
-            all_events.extend(events)
-        except Exception as e:
-            print(f"  ERROR: {e}")
-
-        # Cobb Energy Centre
-        print("Scraping Cobb Energy Centre...")
-        try:
-            events = await scrape_cobb_energy(page)
-            print(f"  Found {len(events)} events")
-            all_events.extend(events)
-        except Exception as e:
-            print(f"  ERROR: {e}")
-
-        # The Masquerade Atlanta
-        print("Scraping The Masquerade...")
-        try:
-            events = await scrape_masquerade(page)
-            print(f"  Found {len(events)} events")
-            all_events.extend(events)
-        except Exception as e:
-            print(f"  ERROR: {e}")
-
-        # Center Stage Atlanta venues (Center Stage, The Loft, Vinyl)
-        for scraper_fn, name in [
-            (scrape_center_stage, "Center Stage"),
-            (scrape_the_loft, "The Loft"),
-            (scrape_vinyl, "Vinyl"),
-        ]:
-            print(f"Scraping {name}...")
-            try:
-                events = await scraper_fn(page)
-                print(f"  Found {len(events)} events")
-                all_events.extend(events)
-            except Exception as e:
-                print(f"  ERROR: {e}")
-
-        # City Winery Atlanta
-        print("Scraping City Winery Atlanta...")
-        try:
-            events = await scrape_city_winery(page)
-            print(f"  Found {len(events)} events")
-            all_events.extend(events)
-        except Exception as e:
-            print(f"  ERROR: {e}")
-
-        # Helium Comedy Club Atlanta (Special Events only)
-        print("Scraping Helium Comedy Club Atlanta...")
-        try:
-            events = await scrape_helium_comedy_atlanta(page)
-            print(f"  Found {len(events)} events")
-            all_events.extend(events)
-        except Exception as e:
-            print(f"  ERROR: {e}")
 
         await browser.close()
 
