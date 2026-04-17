@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate a styled HTML events page from concerts.db → events.html"""
+"""Generate a styled HTML events page from concerts.db → index.html"""
 
 import re
 import sqlite3
@@ -8,7 +8,7 @@ import os
 from datetime import date, datetime
 
 DB_PATH = os.path.join(os.path.dirname(__file__), "concerts.db")
-OUTPUT_PATH = os.path.join(os.path.dirname(__file__), "events.html")
+OUTPUT_PATH = os.path.join(os.path.dirname(__file__), "index.html")
 CALENDAR_PATH = os.path.join(os.path.dirname(__file__), "calendar.html")
 
 
@@ -1331,7 +1331,7 @@ def generate_calendar_html(venues: dict[str, list[dict]]) -> str:
 
 <header class="site-header">
   <div class="header-inner">
-    <a class="site-title" href="events.html">Atlanta<span>&nbsp;Shows</span></a>
+    <a class="site-title" href="index.html">Atlanta<span>&nbsp;Shows</span></a>
     <div class="header-meta">Calendar view</div>
     <div class="search-wrap">
       <input type="search" id="eventSearch" class="search-input"
@@ -1339,7 +1339,7 @@ def generate_calendar_html(venues: dict[str, list[dict]]) -> str:
       <button type="button" id="searchClear" class="search-clear" aria-label="Clear search">✕</button>
     </div>
     <div class="header-count" id="header-count">{total_events} shows</div>
-    <a class="view-toggle" href="events.html">By Venue</a>
+    <a class="view-toggle" href="index.html">By Venue</a>
   </div>
 </header>
 
