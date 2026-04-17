@@ -989,6 +989,20 @@ def try_parse_date(text: str) -> Optional[str]:
             except ValueError:
                 continue
 
+    # Try "Month Day" or "Mon Day" format with no year (e.g. Goat Farm: "April 11")
+    m = re.match(r'^([A-Za-z]+)\s+(\d{1,2})$', cleaned)
+    if m:
+        today_date = date.today()
+        month_str, day_num = m.group(1), m.group(2)
+        for fmt, year in (("%B %d %Y", today_date.year), ("%B %d %Y", today_date.year + 1),
+                          ("%b %d %Y", today_date.year), ("%b %d %Y", today_date.year + 1)):
+            try:
+                dt = datetime.strptime(f"{month_str} {day_num} {year}", fmt)
+                if dt.date() >= today_date:
+                    return dt.strftime("%Y-%m-%d")
+            except ValueError:
+                continue
+
     return None
 
 
