@@ -36,6 +36,7 @@ scraper.log
 .Trashes
 
 # IDE
+.cursor/
 .vscode/
 .idea/
 *.swp
