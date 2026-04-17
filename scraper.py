@@ -118,6 +118,18 @@ def cleanup_past_events(conn) -> int:
     return cursor.rowcount
 
 
+def deduplicate_events(events: list[Event]) -> list[Event]:
+    """Remove duplicate events by (venue, artist, date) key, keeping the first occurrence."""
+    seen: set[tuple] = set()
+    out: list[Event] = []
+    for e in events:
+        key = (e.venue.lower(), e.artist.lower(), e.date_parsed or e.date_text.lower())
+        if key not in seen:
+            seen.add(key)
+            out.append(e)
+    return out
+
+
 # ─── Browser Helpers ──────────────────────────────────────────────────────────
 
 async def scroll_to_bottom(page: Page, max_scrolls: int = 50, wait_ms: int = 2000):
@@ -1270,6 +1282,8 @@ async def run_scraper():
             all_events.extend(events)
 
         await browser.close()
+
+    all_events = deduplicate_events(all_events)
 
     # Detect new events
     print(f"\nComparing with database to detect new events...")

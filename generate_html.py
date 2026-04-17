@@ -94,6 +94,7 @@ def get_upcoming_events() -> dict[str, list[dict]]:
     conn.close()
 
     venues: dict[str, list[dict]] = {}
+    seen: set[tuple] = set()
     for row in rows:
         venue = row["venue"]
         date_parsed = row["date_parsed"] or ""
@@ -103,6 +104,10 @@ def get_upcoming_events() -> dict[str, list[dict]]:
             date_parsed = parsed or ""
             if not show_time and extracted_time:
                 show_time = extracted_time
+        dedup_key = ((row["artist"] or "").lower(), date_parsed, venue.lower())
+        if dedup_key in seen:
+            continue
+        seen.add(dedup_key)
         venues.setdefault(venue, []).append(
             {
                 "artist": row["artist"] or "",
