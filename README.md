@@ -62,7 +62,7 @@ Then set values in `.env`:
 
 **Console output only:** Leave `EMAIL_ENABLED` unset or set to `false` to skip email and just use terminal output.
 
-**Vercel / hosted cron:** Set these same variables in your Vercel project under **Settings → Environment Variables** instead of using a `.env` file.
+**GitHub Actions / hosted:** Set these same variables as GitHub Actions secrets instead of using a `.env` file (see Scheduling section below).
 
 ## Usage
 
@@ -134,19 +134,62 @@ pytest test_scraper.py -v
 
 See `TESTING_SUMMARY.md` for detailed test results.
 
-## Scheduling (cron)
+## How It Works
 
-Run daily at 9 AM:
+```mermaid
+flowchart TD
+    GHA["GitHub Actions\n(daily cron, 9am ET)"]
 
-```bash
-0 9 * * * cd /path/to/concertNotifier && source venv/bin/activate && python scraper.py >> scraper.log 2>&1
+    subgraph scrape["Scrape & Store"]
+        S["scraper.py\n(Playwright + BeautifulSoup)"]
+        DB[("Supabase\n(PostgreSQL)")]
+        S -->|upsert events| DB
+        DB -->|detect new events| S
+    end
+
+    subgraph notify["Notify"]
+        EMAIL["HTML Email\n(SMTP / Gmail)"]
+    end
+
+    subgraph publish["Publish"]
+        GEN["generate_html.py"]
+        HTML["index.html\ncalendar.html"]
+        REPO["GitHub Repo"]
+        VERCEL["Vercel\n(static hosting)"]
+        GEN --> HTML
+        HTML -->|git commit + push| REPO
+        REPO -->|auto deploy| VERCEL
+    end
+
+    GHA --> S
+    S -->|new shows found| EMAIL
+    GHA --> GEN
 ```
 
-This will:
-- Run automatically every morning
-- Check for new concerts
-- Log output to `scraper.log`
-- Send email if new shows are found (when enabled)
+## Scheduling (GitHub Actions)
+
+The scraper runs automatically via GitHub Actions on a daily schedule. The workflow:
+
+1. Runs `scraper.py` — scrapes all venues, stores results in Supabase, sends email if new shows are found
+2. Runs `generate_html.py` — rebuilds `index.html` and `calendar.html` from the database
+3. Commits the updated HTML files and pushes to GitHub
+4. Vercel detects the push and deploys the updated static site automatically
+
+To trigger a manual run, go to **Actions → Run Scraper → Run workflow** in the GitHub UI.
+
+### GitHub Actions Secrets
+
+Set these in your repo under **Settings → Secrets and variables → Actions**:
+
+| Secret | Description |
+|---|---|
+| `SUPABASE_DB_URL` | PostgreSQL connection string |
+| `EMAIL_ENABLED` | `true` to enable email notifications |
+| `EMAIL_SENDER` | From address |
+| `EMAIL_PASSWORD` | SMTP app password |
+| `EMAIL_RECIPIENTS` | Comma-separated recipient addresses |
+| `EMAIL_SMTP_SERVER` | SMTP host (default: `smtp.gmail.com`) |
+| `EMAIL_SMTP_PORT` | SMTP port (default: `587`) |
 
 ## Database
 
@@ -179,15 +222,18 @@ sqlite3 concerts.db "SELECT venue, artist, date_parsed FROM events WHERE venue =
 ```
 concertNotifier/
 ├── scraper.py              # Main scraper script
+├── generate_html.py        # Rebuilds index.html and calendar.html from DB
+├── index.html              # Static events listing (served by Vercel)
+├── calendar.html           # Static calendar view (served by Vercel)
 ├── test_scraper.py         # Pytest unit tests
 ├── test_venues.py          # Integration tests
 ├── requirements.txt        # Python dependencies
-├── .env                   # Email/DB config (gitignored)
-├── .env.example           # Config template
-├── concerts.db            # SQLite database (gitignored)
-├── README.md              # This file
-├── TESTING_SUMMARY.md     # Test results
-└── .gitignore             # Git ignore rules
+├── .env.example            # Config template
+├── .github/
+│   └── workflows/
+│       └── scraper.yml     # GitHub Actions daily cron workflow
+├── README.md               # This file
+└── .gitignore
 ```
 
 ## Customization
