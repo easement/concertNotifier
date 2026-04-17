@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
-"""Generate a styled HTML events page from concerts.db → index.html"""
+"""Generate a styled HTML events page from Supabase → index.html"""
 
 import re
-import sqlite3
 import json
 import os
 from datetime import date, datetime
@@ -10,7 +9,6 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-DB_PATH = os.path.join(os.path.dirname(__file__), "concerts.db")
 OUTPUT_PATH = os.path.join(os.path.dirname(__file__), "index.html")
 CALENDAR_PATH = os.path.join(os.path.dirname(__file__), "calendar.html")
 SUPABASE_DB_URL = os.getenv("SUPABASE_DB_URL")
@@ -77,38 +75,23 @@ def _parse_date_from_text(text: str) -> tuple[str | None, str | None]:
 
 
 def get_upcoming_events() -> dict[str, list[dict]]:
+    import psycopg
+    from psycopg.rows import dict_row
+    if not SUPABASE_DB_URL:
+        raise RuntimeError("SUPABASE_DB_URL environment variable is not set.")
     today = date.today().isoformat()
-
-    if SUPABASE_DB_URL:
-        import psycopg
-        from psycopg.rows import dict_row
-        conn = psycopg.connect(SUPABASE_DB_URL, row_factory=dict_row)
-        cur = conn.execute(
-            """
-            SELECT venue, artist, date_text, date_parsed::text, show_time, price, ticket_url, detail_url
-            FROM events
-            WHERE (date_parsed >= %s OR date_parsed IS NULL)
-            ORDER BY venue, date_parsed NULLS LAST, artist
-            """,
-            (today,),
-        )
-        rows = cur.fetchall()
-        conn.close()
-    else:
-        conn = sqlite3.connect(DB_PATH)
-        conn.row_factory = sqlite3.Row
-        cur = conn.cursor()
-        cur.execute(
-            """
-            SELECT venue, artist, date_text, date_parsed, show_time, price, ticket_url, detail_url
-            FROM events
-            WHERE (date_parsed >= ? OR date_parsed IS NULL OR date_parsed = '')
-            ORDER BY venue, date_parsed NULLS LAST, artist
-            """,
-            (today,),
-        )
-        rows = cur.fetchall()
-        conn.close()
+    conn = psycopg.connect(SUPABASE_DB_URL, row_factory=dict_row)
+    cur = conn.execute(
+        """
+        SELECT venue, artist, date_text, date_parsed::text, show_time, price, ticket_url, detail_url
+        FROM events
+        WHERE (date_parsed >= %s OR date_parsed IS NULL)
+        ORDER BY venue, date_parsed NULLS LAST, artist
+        """,
+        (today,),
+    )
+    rows = cur.fetchall()
+    conn.close()
 
     venues: dict[str, list[dict]] = {}
     for row in rows:
@@ -1432,7 +1415,7 @@ def generate_calendar_html(venues: dict[str, list[dict]]) -> str:
 
 
 def main():
-    print("Reading concerts.db…")
+    print("Reading events from Supabase…")
     venues = get_upcoming_events()
     total = sum(len(v) for v in venues.values())
     print(f"Found {total} upcoming events across {len(venues)} venues.")
