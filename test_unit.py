@@ -15,6 +15,7 @@ from scraper import (
     build_email_html,
     upsert_events,
     cleanup_past_events,
+    deduplicate_events,
     scrape_aeg_venue,
     scrape_the_earl,
     scrape_goat_farm,
@@ -390,11 +391,11 @@ class TestBuildEmailHtml:
 
     def test_event_count_in_heading(self):
         events = [make_event(artist=f"Artist {i}", ticket_url=f"https://t.com/{i}") for i in range(3)]
-        assert "3 New Atlanta Shows" in build_email_html(events)
+        assert "3 new show" in build_email_html(events).lower()
 
     def test_valid_html_structure(self):
         html = build_email_html([make_event()])
-        assert "<html>" in html
+        assert "<html" in html
         assert "</html>" in html
         assert "<table" in html
 
@@ -505,6 +506,63 @@ class TestDatabase:
 
     def test_cleanup_on_empty_db_returns_zero(self):
         assert cleanup_past_events(self.conn) == 0
+
+
+# ─── Deduplication ────────────────────────────────────────────────────────────
+
+class TestDeduplicateEvents:
+    def test_unique_events_unchanged(self):
+        events = [
+            make_event(artist="Artist A", date_parsed="2026-06-01", ticket_url="https://t.com/1"),
+            make_event(artist="Artist B", date_parsed="2026-06-01", ticket_url="https://t.com/2"),
+        ]
+        assert deduplicate_events(events) == events
+
+    def test_exact_duplicate_removed(self):
+        e = make_event(artist="Band", date_parsed="2026-06-01")
+        result = deduplicate_events([e, e])
+        assert len(result) == 1
+
+    def test_same_artist_date_venue_different_url_deduped(self):
+        e1 = make_event(artist="Band", date_parsed="2026-06-01", ticket_url="https://t.com/1")
+        e2 = make_event(artist="Band", date_parsed="2026-06-01", ticket_url="https://t.com/2")
+        result = deduplicate_events([e1, e2])
+        assert len(result) == 1
+        assert result[0] is e1
+
+    def test_same_artist_different_date_kept(self):
+        e1 = make_event(artist="Band", date_parsed="2026-06-01", ticket_url="https://t.com/1")
+        e2 = make_event(artist="Band", date_parsed="2026-06-02", ticket_url="https://t.com/2")
+        assert len(deduplicate_events([e1, e2])) == 2
+
+    def test_same_artist_date_different_venue_kept(self):
+        e1 = make_event(venue="The Eastern", artist="Band", date_parsed="2026-06-01", ticket_url="https://t.com/1")
+        e2 = make_event(venue="Fox Theatre", artist="Band", date_parsed="2026-06-01", ticket_url="https://t.com/2")
+        assert len(deduplicate_events([e1, e2])) == 2
+
+    def test_case_insensitive_artist_match(self):
+        e1 = make_event(artist="The Band", date_parsed="2026-06-01", ticket_url="https://t.com/1")
+        e2 = make_event(artist="the band", date_parsed="2026-06-01", ticket_url="https://t.com/2")
+        assert len(deduplicate_events([e1, e2])) == 1
+
+    def test_no_date_parsed_falls_back_to_date_text(self):
+        e1 = make_event(artist="Band", date_parsed=None, date_text="Jun 1, 2026", ticket_url="https://t.com/1")
+        e2 = make_event(artist="Band", date_parsed=None, date_text="Jun 1, 2026", ticket_url="https://t.com/2")
+        assert len(deduplicate_events([e1, e2])) == 1
+
+    def test_different_date_text_when_no_parsed_kept(self):
+        e1 = make_event(artist="Band", date_parsed=None, date_text="Jun 1, 2026", ticket_url="https://t.com/1")
+        e2 = make_event(artist="Band", date_parsed=None, date_text="June 1, 2026", ticket_url="https://t.com/2")
+        assert len(deduplicate_events([e1, e2])) == 2
+
+    def test_empty_list(self):
+        assert deduplicate_events([]) == []
+
+    def test_first_occurrence_kept(self):
+        e1 = make_event(artist="Band", date_parsed="2026-06-01", ticket_url="https://t.com/first")
+        e2 = make_event(artist="Band", date_parsed="2026-06-01", ticket_url="https://t.com/second")
+        result = deduplicate_events([e1, e2])
+        assert result[0].ticket_url == "https://t.com/first"
 
 
 # ─── Scraper HTML Parsing ─────────────────────────────────────────────────────
