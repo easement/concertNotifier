@@ -5,6 +5,10 @@ on:
     - cron: '0 13 * * *'  # 9am ET daily
   workflow_dispatch:       # allow manual runs from GitHub UI
 
+concurrency:
+  group: scraper
+  cancel-in-progress: false  # queue concurrent runs rather than cancel them
+
 permissions:
   contents: write          # required to push updated HTML files back to the repo
 
@@ -16,6 +20,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - uses: actions/setup-python@v5
         with:
