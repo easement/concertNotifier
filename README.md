@@ -42,19 +42,27 @@ playwright install chromium
 
 ### 3. Configure Email (Optional)
 
-Copy the example config:
+Email settings are read from environment variables. Copy the example env file:
 ```bash
-cp config.example.json config.json
+cp .env.example .env
 ```
 
-Then edit `config.json`:
-- Set `"enabled": true` to enable email notifications
-- Add your SMTP credentials
-- Add recipient email addresses
+Then set values in `.env`:
+
+| Variable | Description | Default |
+|---|---|---|
+| `EMAIL_ENABLED` | Set to `true` to enable email notifications | `false` |
+| `EMAIL_SENDER` | From address | |
+| `EMAIL_PASSWORD` | SMTP password / app password | |
+| `EMAIL_RECIPIENTS` | Comma-separated list of recipient addresses | |
+| `EMAIL_SMTP_SERVER` | SMTP host | `smtp.gmail.com` |
+| `EMAIL_SMTP_PORT` | SMTP port | `587` |
 
 **Gmail users:** You'll need an [App Password](https://myaccount.google.com/apppasswords) (not your regular password). Enable 2FA first, then generate an app password.
 
-**Console output only:** Keep `"enabled": false` to skip email and just use terminal output (default).
+**Console output only:** Leave `EMAIL_ENABLED` unset or set to `false` to skip email and just use terminal output.
+
+**Vercel / hosted cron:** Set these same variables in your Vercel project under **Settings → Environment Variables** instead of using a `.env` file.
 
 ## Usage
 
@@ -174,8 +182,8 @@ concertNotifier/
 ├── test_scraper.py         # Pytest unit tests
 ├── test_venues.py          # Integration tests
 ├── requirements.txt        # Python dependencies
-├── config.json            # Email config (gitignored)
-├── config.example.json    # Config template
+├── .env                   # Email/DB config (gitignored)
+├── .env.example           # Config template
 ├── concerts.db            # SQLite database (gitignored)
 ├── README.md              # This file
 ├── TESTING_SUMMARY.md     # Test results
