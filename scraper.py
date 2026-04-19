@@ -246,7 +246,10 @@ async def scrape_aeg_venue(page: Page, url: str, venue_name: str) -> list[Event]
         artist = re.sub(r'^(.*?\s+)?presents?\s+', '', artist, flags=re.IGNORECASE)
         artist = re.sub(r'^(.*?)\s+&\s+(.*?\s+)?presents?\s+', '', artist, flags=re.IGNORECASE)
 
-        date_text = date_el.get_text(separator=" ", strip=True) if date_el else ""
+        if date_el and date_el.name == "time" and date_el.get("datetime"):
+            date_text = date_el["datetime"]
+        else:
+            date_text = date_el.get_text(separator=" ", strip=True) if date_el else ""
         link = link_el["href"] if link_el and link_el.has_attr("href") else None
 
         # Skip invalid entries (calendar headers, month labels, empty artists)
@@ -1058,8 +1061,8 @@ def format_display_date(event: Event) -> str:
         except (ValueError, AttributeError):
             pass
 
-    # Fallback to raw date text if we have it
-    if event.date_text:
+    # Fallback to raw date text if it looks like a date, not a time
+    if event.date_text and not re.match(r'^\d+:\d+', event.date_text.strip()):
         return event.date_text
 
     return "TBA"
@@ -1291,10 +1294,12 @@ async def run_scraper():
     deleted = cleanup_past_events(conn)
     print(f"Database updated! ({deleted} past events removed)")
 
-    # Send email if there are new events
+    # Send email if there are new future events
+    today_str = date.today().isoformat()
+    all_new_future = [e for e in all_new if not e.date_parsed or e.date_parsed >= today_str]
     config = load_config()
-    if all_new:
-        send_email(all_new, config)
+    if all_new_future:
+        send_email(all_new_future, config)
 
     # Report
     print(f"\n{'='*60}")
