@@ -11,6 +11,7 @@ load_dotenv()
 
 OUTPUT_PATH = os.path.join(os.path.dirname(__file__), "index.html")
 CALENDAR_PATH = os.path.join(os.path.dirname(__file__), "calendar.html")
+NEW_PATH = os.path.join(os.path.dirname(__file__), "new.html")
 SUPABASE_DB_URL = os.getenv("SUPABASE_DB_URL")
 
 
@@ -122,6 +123,54 @@ def get_upcoming_events() -> dict[str, list[dict]]:
     return venues
 
 
+def get_new_events() -> list[dict]:
+    import psycopg
+    from psycopg.rows import dict_row
+    if not SUPABASE_DB_URL:
+        raise RuntimeError("SUPABASE_DB_URL environment variable is not set.")
+    conn = psycopg.connect(SUPABASE_DB_URL, row_factory=dict_row)
+    cur = conn.execute(
+        """
+        SELECT venue, artist, date_text, date_parsed::text, show_time, price,
+               ticket_url, detail_url, first_seen
+        FROM events
+        WHERE first_seen >= NOW() - INTERVAL '7 days'
+        ORDER BY date_parsed NULLS LAST, venue, artist
+        """,
+    )
+    rows = cur.fetchall()
+    conn.close()
+
+    seen: set[tuple] = set()
+    events: list[dict] = []
+    for row in rows:
+        date_parsed = row["date_parsed"] or ""
+        show_time = row["show_time"] or ""
+        if not date_parsed and row["date_text"]:
+            parsed, extracted_time = _parse_date_from_text(row["date_text"])
+            date_parsed = parsed or ""
+            if not show_time and extracted_time:
+                show_time = extracted_time
+        dedup_key = ((row["artist"] or "").lower(), date_parsed, (row["venue"] or "").lower())
+        if dedup_key in seen:
+            continue
+        seen.add(dedup_key)
+        events.append(
+            {
+                "venue": row["venue"] or "",
+                "artist": row["artist"] or "",
+                "date_text": row["date_text"] or "",
+                "date_parsed": date_parsed,
+                "show_time": show_time,
+                "price": row["price"] or "",
+                "ticket_url": row["ticket_url"] or "",
+                "detail_url": row["detail_url"] or "",
+                "first_seen": row["first_seen"],
+            }
+        )
+    return events
+
+
 def generate_html(venues: dict[str, list[dict]]) -> str:
     today_iso = date.today().isoformat()
     generated_at = datetime.now().strftime("%B %d, %Y at %I:%M %p")
@@ -137,6 +186,15 @@ def generate_html(venues: dict[str, list[dict]]) -> str:
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;1,9..40,300&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+<!-- Google tag (gtag.js) -->
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-PBV4JNMPB7"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){{dataLayer.push(arguments);}}
+  gtag('js', new Date());
+  gtag('config', 'G-PBV4JNMPB7');
+</script>
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%2312122a'/%3E%3Cg fill='%23e94560' opacity='0.9'%3E%3Crect x='4' y='24' width='3' height='4'/%3E%3Crect x='9' y='19' width='3' height='9'/%3E%3Crect x='14' y='14' width='3' height='14'/%3E%3Crect x='19' y='10' width='3' height='18'/%3E%3Crect x='24' y='16' width='3' height='12'/%3E%3C/g%3E%3C/svg%3E">
 <style>
   :root {{
     --navy:       #1a1a2e;
@@ -609,6 +667,7 @@ def generate_html(venues: dict[str, list[dict]]) -> str:
       <button type="button" id="searchClear" class="search-clear" aria-label="Clear search">✕</button>
     </div>
     <div class="header-count" id="header-count">{total_events} shows</div>
+    <a class="view-toggle" href="new.html">New</a>
     <a class="view-toggle" href="calendar.html">Calendar</a>
   </div>
 </header>
@@ -1040,6 +1099,15 @@ def generate_calendar_html(venues: dict[str, list[dict]]) -> str:
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;1,9..40,300&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+<!-- Google tag (gtag.js) -->
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-PBV4JNMPB7"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){{dataLayer.push(arguments);}}
+  gtag('js', new Date());
+  gtag('config', 'G-PBV4JNMPB7');
+</script>
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%2312122a'/%3E%3Cg fill='%23e94560' opacity='0.9'%3E%3Crect x='4' y='24' width='3' height='4'/%3E%3Crect x='9' y='19' width='3' height='9'/%3E%3Crect x='14' y='14' width='3' height='14'/%3E%3Crect x='19' y='10' width='3' height='18'/%3E%3Crect x='24' y='16' width='3' height='12'/%3E%3C/g%3E%3C/svg%3E">
 <style>
   :root {{
     --navy:       #1a1a2e;
@@ -1350,6 +1418,7 @@ def generate_calendar_html(venues: dict[str, list[dict]]) -> str:
       <button type="button" id="searchClear" class="search-clear" aria-label="Clear search">✕</button>
     </div>
     <div class="header-count" id="header-count">{total_events} shows</div>
+    <a class="view-toggle" href="new.html">New</a>
     <a class="view-toggle" href="index.html">By Venue</a>
   </div>
 </header>
@@ -1419,6 +1488,495 @@ def generate_calendar_html(venues: dict[str, list[dict]]) -> str:
 """
 
 
+def generate_new_events_html(events: list[dict]) -> str:
+    today_iso = date.today().isoformat()
+    generated_at = datetime.now().strftime("%B %d, %Y at %I:%M %p")
+    total_events = len(events)
+
+    from itertools import groupby
+
+    # Group by date_parsed for display
+    date_sections_html = ""
+    for date_key, group in groupby(events, key=lambda e: e["date_parsed"] or ""):
+        group_list = list(group)
+        if date_key:
+            y, m, d_ = date_key.split("-")
+            from datetime import date as date_cls
+            d_obj = date_cls(int(y), int(m), int(d_))
+            js_days = ["Mon", "Tue", "Wed", "Thurs", "Fri", "Sat", "Sun"]
+            dow = js_days[d_obj.weekday()]
+            month_names = ["January", "February", "March", "April", "May", "June",
+                           "July", "August", "September", "October", "November", "December"]
+            date_label = f"({dow}) {month_names[d_obj.month - 1]} {d_obj.day}"
+            is_today = date_key == today_iso
+            today_badge = '<span class="today-badge">Today</span>' if is_today else ""
+        else:
+            date_label = "Date TBA"
+            is_today = False
+            today_badge = ""
+
+        row_class = "is-today" if is_today else ""
+
+        rows_html = ""
+        for e in group_list:
+            artist = e["artist"].replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+            venue_display = e["venue"].replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+            # Compute "added X days ago" label from first_seen
+            added_label = ""
+            if e.get("first_seen"):
+                fs = e["first_seen"]
+                if hasattr(fs, "date"):
+                    fs_date = fs.date()
+                else:
+                    fs_date = date.fromisoformat(str(fs)[:10])
+                delta = (date.today() - fs_date).days
+                if delta == 0:
+                    added_label = "today"
+                elif delta == 1:
+                    added_label = "yesterday"
+                else:
+                    added_label = f"{delta}d ago"
+            if e.get("ticket_url"):
+                url = e["ticket_url"].replace('"', "&quot;")
+                link_html = f'<a class="ticket-link" href="{url}" target="_blank" rel="noopener">Tickets</a>'
+            elif e.get("detail_url"):
+                url = e["detail_url"].replace('"', "&quot;")
+                link_html = f'<a class="ticket-link" href="{url}" target="_blank" rel="noopener">Info</a>'
+            else:
+                link_html = ""
+            added_html = f'<span class="added-badge">{added_label}</span>' if added_label else ""
+            rows_html += f"""<tr class="{row_class}">
+        <td class="td-artist">{artist}</td>
+        <td class="td-venue">{venue_display}</td>
+        <td class="td-added">{added_html}</td>
+        <td class="td-link">{link_html}</td>
+      </tr>"""
+
+        date_sections_html += f"""
+  <div class="date-section" data-date="{date_key}">
+    <div class="date-heading">
+      <div class="date-label">{date_label}{today_badge}</div>
+      <div class="date-event-count">{len(group_list)} show{"s" if len(group_list) != 1 else ""}</div>
+    </div>
+    <table class="events-table">
+      <thead>
+        <tr>
+          <th>Artist / Event</th>
+          <th>Venue</th>
+          <th>Added</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>{rows_html}</tbody>
+    </table>
+  </div>"""
+
+    if not date_sections_html:
+        date_sections_html = '<div class="empty-state">No new events added in the past 7 days.</div>'
+
+    return f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Atlanta Shows — New This Week</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;1,9..40,300&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+<!-- Google tag (gtag.js) -->
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-PBV4JNMPB7"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){{dataLayer.push(arguments);}}
+  gtag('js', new Date());
+  gtag('config', 'G-PBV4JNMPB7');
+</script>
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%2312122a'/%3E%3Cg fill='%23e94560' opacity='0.9'%3E%3Crect x='4' y='24' width='3' height='4'/%3E%3Crect x='9' y='19' width='3' height='9'/%3E%3Crect x='14' y='14' width='3' height='14'/%3E%3Crect x='19' y='10' width='3' height='18'/%3E%3Crect x='24' y='16' width='3' height='12'/%3E%3C/g%3E%3C/svg%3E">
+<style>
+  :root {{
+    --navy:       #1a1a2e;
+    --navy-deep:  #12122a;
+    --navy-mid:   #232340;
+    --navy-card:  #1e1e38;
+    --coral:      #e94560;
+    --coral-dim:  #b8304a;
+    --coral-glow: rgba(233,69,96,0.18);
+    --white:      #f2f0ee;
+    --gray:       #9494aa;
+    --gray-dim:   #5c5c78;
+    --border:     rgba(255,255,255,0.07);
+    --font-display: 'Bebas Neue', sans-serif;
+    --font-body:    'DM Sans', sans-serif;
+    --font-mono:    'DM Mono', monospace;
+  }}
+
+  *, *::before, *::after {{ box-sizing: border-box; margin: 0; padding: 0; }}
+  html {{ scroll-behavior: smooth; }}
+
+  body {{
+    background-color: var(--navy-deep);
+    color: var(--white);
+    font-family: var(--font-body);
+    min-height: 100vh;
+    background-image:
+      url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='300' height='300'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.75' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='300' height='300' filter='url(%23n)' opacity='0.035'/%3E%3C/svg%3E");
+  }}
+
+  .site-header {{
+    position: sticky;
+    top: 0;
+    z-index: 100;
+    background: var(--navy-deep);
+    border-bottom: 1px solid var(--border);
+    backdrop-filter: blur(12px);
+  }}
+
+  .header-inner {{
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 0 24px;
+    display: flex;
+    align-items: baseline;
+    gap: 20px;
+    height: 64px;
+  }}
+
+  .site-title {{
+    font-family: var(--font-display);
+    font-size: 2rem;
+    letter-spacing: 0.06em;
+    color: var(--white);
+    line-height: 1;
+    flex-shrink: 0;
+    text-decoration: none;
+  }}
+  .site-title span {{ color: var(--coral); }}
+
+  .header-meta {{
+    font-family: var(--font-mono);
+    font-size: 0.68rem;
+    color: var(--gray-dim);
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    padding-bottom: 2px;
+  }}
+
+  .header-count {{
+    font-family: var(--font-mono);
+    font-size: 0.72rem;
+    color: var(--gray);
+    flex-shrink: 0;
+  }}
+
+  .view-toggle {{
+    font-family: var(--font-mono);
+    font-size: 0.68rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--gray-dim);
+    text-decoration: none;
+    border: 1px solid var(--gray-dim);
+    padding: 4px 10px;
+    border-radius: 3px;
+    transition: color 0.15s, border-color 0.15s;
+    flex-shrink: 0;
+  }}
+  .view-toggle:hover {{ color: var(--white); border-color: var(--gray); }}
+  .view-toggle.active {{ color: var(--coral); border-color: var(--coral-dim); }}
+
+  .search-wrap {{
+    width: 240px;
+    margin-left: auto;
+    margin-right: 16px;
+    position: relative;
+    display: flex;
+    align-items: center;
+    flex-shrink: 0;
+  }}
+  .search-input {{
+    width: 100%;
+    background: var(--navy-mid);
+    border: 1px solid var(--border);
+    border-radius: 20px;
+    padding: 7px 30px 7px 14px;
+    font-family: var(--font-body);
+    font-size: 0.8rem;
+    color: var(--white);
+    outline: none;
+    transition: border-color 0.18s, background 0.18s;
+    -webkit-appearance: none;
+  }}
+  .search-input::placeholder {{ color: var(--gray-dim); }}
+  .search-input:focus {{
+    border-color: var(--gray-dim);
+    background: var(--navy-card);
+  }}
+  .search-input::-webkit-search-cancel-button {{ display: none; }}
+  .search-clear {{
+    position: absolute;
+    right: 10px;
+    background: none;
+    border: none;
+    color: var(--gray-dim);
+    cursor: pointer;
+    font-size: 0.68rem;
+    line-height: 1;
+    padding: 2px 4px;
+    display: none;
+    transition: color 0.15s;
+  }}
+  .search-clear:hover {{ color: var(--white); }}
+  .search-clear.visible {{ display: block; }}
+
+  .main {{
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 32px 24px 80px;
+  }}
+
+  .date-section {{ margin-bottom: 48px; }}
+  .date-section.hidden {{ display: none; }}
+
+  .date-heading {{
+    display: flex;
+    align-items: baseline;
+    gap: 14px;
+    margin-bottom: 4px;
+    padding-bottom: 10px;
+    border-bottom: 2px solid var(--coral);
+  }}
+
+  .date-label {{
+    font-family: var(--font-display);
+    font-size: 1.65rem;
+    letter-spacing: 0.05em;
+    color: var(--white);
+    line-height: 1;
+  }}
+
+  .date-event-count {{
+    font-family: var(--font-mono);
+    font-size: 0.7rem;
+    color: var(--gray);
+    letter-spacing: 0.08em;
+  }}
+
+  .today-badge {{
+    display: inline-block;
+    background: var(--coral);
+    color: #fff;
+    font-family: var(--font-mono);
+    font-size: 0.6rem;
+    font-weight: 500;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    padding: 2px 6px;
+    border-radius: 3px;
+    margin-left: 10px;
+    vertical-align: middle;
+    position: relative;
+    top: -3px;
+  }}
+
+  .events-table {{
+    width: 100%;
+    border-collapse: collapse;
+    margin-top: 2px;
+  }}
+
+  .events-table thead th {{
+    font-family: var(--font-mono);
+    font-size: 0.62rem;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--gray-dim);
+    padding: 10px 12px 8px;
+    text-align: left;
+    border-bottom: 1px solid var(--border);
+    font-weight: 400;
+  }}
+  .events-table thead th:last-child {{ text-align: right; }}
+
+  .events-table tbody tr {{
+    border-bottom: 1px solid var(--border);
+    transition: background 0.14s;
+    cursor: default;
+  }}
+  .events-table tbody tr:hover {{ background: rgba(255,255,255,0.03); }}
+  .events-table tbody tr.is-today {{ background: rgba(233,69,96,0.06); }}
+  .events-table tbody tr.is-today:hover {{ background: rgba(233,69,96,0.1); }}
+
+  .events-table td {{ padding: 13px 12px; vertical-align: middle; }}
+
+  .td-artist {{
+    font-size: 0.95rem;
+    font-weight: 500;
+    color: var(--white);
+    width: 40%;
+  }}
+
+  .td-venue {{
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+    color: var(--gray);
+    width: 40%;
+  }}
+
+  .td-added {{
+    width: 90px;
+    white-space: nowrap;
+  }}
+
+  .added-badge {{
+    font-family: var(--font-mono);
+    font-size: 0.65rem;
+    letter-spacing: 0.06em;
+    color: var(--gray-dim);
+    background: var(--navy-mid);
+    padding: 2px 7px;
+    border-radius: 3px;
+    border: 1px solid var(--border);
+  }}
+
+  .td-link {{
+    text-align: right;
+    width: 10%;
+    white-space: nowrap;
+  }}
+
+  .ticket-link {{
+    display: inline-block;
+    font-family: var(--font-mono);
+    font-size: 0.65rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--coral);
+    text-decoration: none;
+    border: 1px solid var(--coral-dim);
+    padding: 4px 10px;
+    border-radius: 3px;
+    transition: background 0.15s, color 0.15s;
+    white-space: nowrap;
+  }}
+  .ticket-link:hover {{
+    background: var(--coral);
+    color: #fff;
+    border-color: var(--coral);
+  }}
+
+  .empty-state, .search-empty {{
+    padding: 60px 0;
+    text-align: center;
+    color: var(--gray-dim);
+    font-family: var(--font-mono);
+    font-size: 0.8rem;
+    letter-spacing: 0.08em;
+  }}
+
+  .site-footer {{
+    text-align: center;
+    padding: 40px 24px;
+    font-family: var(--font-mono);
+    font-size: 0.65rem;
+    letter-spacing: 0.1em;
+    color: var(--gray-dim);
+    border-top: 1px solid var(--border);
+    text-transform: uppercase;
+  }}
+
+  @media (max-width: 680px) {{
+    .site-title {{ font-size: 1.5rem; }}
+    .header-count {{ display: none; }}
+    .search-wrap {{ width: 160px; margin-right: 8px; }}
+    .date-label {{ font-size: 1.3rem; }}
+    .td-added {{ display: none; }}
+    .view-toggle {{ display: none; }}
+  }}
+</style>
+</head>
+<body>
+
+<header class="site-header">
+  <div class="header-inner">
+    <a class="site-title" href="index.html">Atlanta<span>&nbsp;Shows</span></a>
+    <div class="header-meta">New this week</div>
+    <div class="search-wrap">
+      <input type="search" id="eventSearch" class="search-input"
+             placeholder="Search artists…" autocomplete="off" spellcheck="false" aria-label="Search artists">
+      <button type="button" id="searchClear" class="search-clear" aria-label="Clear search">✕</button>
+    </div>
+    <div class="header-count" id="header-count">{total_events} new</div>
+    <a class="view-toggle active" href="new.html">New</a>
+    <a class="view-toggle" href="calendar.html">Calendar</a>
+    <a class="view-toggle" href="index.html">By Venue</a>
+  </div>
+</header>
+
+<main class="main" id="mainContent">
+{date_sections_html}
+  <div id="searchEmpty" class="search-empty" style="display:none"></div>
+</main>
+
+<footer class="site-footer">
+  Atlanta Concert Scraper &nbsp;·&nbsp; Generated {generated_at}
+</footer>
+
+<script>
+(function () {{
+  const searchInput = document.getElementById('eventSearch');
+  const searchClear = document.getElementById('searchClear');
+  const headerCount = document.getElementById('header-count');
+  const searchEmpty = document.getElementById('searchEmpty');
+  const totalShows = {total_events};
+  const sections = Array.from(document.querySelectorAll('.date-section'));
+
+  function doSearch(query) {{
+    const q = query.trim().toLowerCase();
+    searchClear.classList.toggle('visible', query.length > 0);
+
+    if (!q) {{
+      sections.forEach(s => {{
+        s.classList.remove('hidden');
+        s.querySelectorAll('tbody tr').forEach(r => r.style.display = '');
+      }});
+      headerCount.textContent = totalShows + ' new';
+      searchEmpty.style.display = 'none';
+      return;
+    }}
+
+    let matchCount = 0;
+    sections.forEach(s => {{
+      let sectionHits = 0;
+      s.querySelectorAll('tbody tr').forEach(r => {{
+        const artist = (r.querySelector('.td-artist') || {{}}).textContent || '';
+        const matches = artist.toLowerCase().includes(q);
+        r.style.display = matches ? '' : 'none';
+        if (matches) sectionHits++;
+      }});
+      matchCount += sectionHits;
+      s.classList.toggle('hidden', sectionHits === 0);
+    }});
+
+    headerCount.textContent = matchCount + (matchCount === 1 ? ' match' : ' matches');
+    searchEmpty.style.display = matchCount === 0 ? 'block' : 'none';
+    if (matchCount === 0) {{
+      const esc = query.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+      searchEmpty.innerHTML = 'No results for &ldquo;' + esc + '&rdquo;';
+    }}
+  }}
+
+  searchInput.addEventListener('input', e => doSearch(e.target.value));
+  searchClear.addEventListener('click', () => {{ searchInput.value = ''; doSearch(''); searchInput.focus(); }});
+  searchInput.addEventListener('keydown', e => {{
+    if (e.key === 'Escape') {{ searchInput.value = ''; doSearch(''); searchInput.blur(); }}
+  }});
+}})();
+</script>
+</body>
+</html>
+"""
+
+
 def main():
     print("Reading events from Supabase…")
     venues = get_upcoming_events()
@@ -1434,6 +1992,13 @@ def main():
     with open(CALENDAR_PATH, "w", encoding="utf-8") as f:
         f.write(calendar)
     print(f"Written → {CALENDAR_PATH}")
+
+    new_events = get_new_events()
+    print(f"Found {len(new_events)} events added in the past 7 days.")
+    new_html = generate_new_events_html(new_events)
+    with open(NEW_PATH, "w", encoding="utf-8") as f:
+        f.write(new_html)
+    print(f"Written → {NEW_PATH}")
 
 
 if __name__ == "__main__":
