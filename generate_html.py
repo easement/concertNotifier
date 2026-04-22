@@ -135,7 +135,7 @@ def get_new_events() -> list[dict]:
                ticket_url, detail_url, first_seen
         FROM events
         WHERE first_seen >= NOW() - INTERVAL '7 days'
-        ORDER BY date_parsed NULLS LAST, venue, artist
+        ORDER BY first_seen DESC, date_parsed NULLS LAST, venue, artist
         """,
     )
     rows = cur.fetchall()
@@ -1494,48 +1494,59 @@ def generate_new_events_html(events: list[dict]) -> str:
     total_events = len(events)
 
     from itertools import groupby
+    from datetime import date as date_cls
 
-    # Group by date_parsed for display
+    def _first_seen_date_key(e: dict) -> str:
+        fs = e.get("first_seen")
+        if not fs:
+            return ""
+        if hasattr(fs, "date"):
+            return fs.date().isoformat()
+        return str(fs)[:10]
+
+    # Group by first_seen date (newest first — already sorted by query)
     date_sections_html = ""
-    for date_key, group in groupby(events, key=lambda e: e["date_parsed"] or ""):
+    for added_date_key, group in groupby(events, key=_first_seen_date_key):
         group_list = list(group)
-        if date_key:
-            y, m, d_ = date_key.split("-")
-            from datetime import date as date_cls
+        if added_date_key:
+            y, m, d_ = added_date_key.split("-")
             d_obj = date_cls(int(y), int(m), int(d_))
             js_days = ["Mon", "Tue", "Wed", "Thurs", "Fri", "Sat", "Sun"]
             dow = js_days[d_obj.weekday()]
             month_names = ["January", "February", "March", "April", "May", "June",
                            "July", "August", "September", "October", "November", "December"]
-            date_label = f"({dow}) {month_names[d_obj.month - 1]} {d_obj.day}"
-            is_today = date_key == today_iso
-            today_badge = '<span class="today-badge">Today</span>' if is_today else ""
+            is_today = added_date_key == today_iso
+            delta = (date.today() - d_obj).days
+            if delta == 0:
+                recency_label = "Today"
+            elif delta == 1:
+                recency_label = "Yesterday"
+            else:
+                recency_label = f"{delta} days ago"
+            date_label = f"{recency_label} — ({dow}) {month_names[d_obj.month - 1]} {d_obj.day}"
+            today_badge = ""
         else:
-            date_label = "Date TBA"
+            date_label = "Unknown date"
             is_today = False
             today_badge = ""
 
-        row_class = "is-today" if is_today else ""
+        # Sort entries within the group by show date
+        group_list.sort(key=lambda e: (e["date_parsed"] or "9999", e["venue"], e["artist"]))
 
         rows_html = ""
         for e in group_list:
             artist = e["artist"].replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
             venue_display = e["venue"].replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-            # Compute "added X days ago" label from first_seen
-            added_label = ""
-            if e.get("first_seen"):
-                fs = e["first_seen"]
-                if hasattr(fs, "date"):
-                    fs_date = fs.date()
-                else:
-                    fs_date = date.fromisoformat(str(fs)[:10])
-                delta = (date.today() - fs_date).days
-                if delta == 0:
-                    added_label = "today"
-                elif delta == 1:
-                    added_label = "yesterday"
-                else:
-                    added_label = f"{delta}d ago"
+            show_date = e.get("date_parsed", "")
+            if show_date:
+                sy, sm, sd = show_date.split("-")
+                sd_obj = date_cls(int(sy), int(sm), int(sd))
+                month_names = ["Jan", "Feb", "Mar", "Apr", "May", "Jun",
+                               "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+                show_date_display = f"{month_names[sd_obj.month - 1]} {sd_obj.day}"
+            else:
+                show_date_display = e.get("date_text") or "TBA"
+            row_class = "is-today" if show_date == today_iso else ""
             if e.get("ticket_url"):
                 url = e["ticket_url"].replace('"', "&quot;")
                 link_html = f'<a class="ticket-link" href="{url}" target="_blank" rel="noopener">Tickets</a>'
@@ -1544,16 +1555,15 @@ def generate_new_events_html(events: list[dict]) -> str:
                 link_html = f'<a class="ticket-link" href="{url}" target="_blank" rel="noopener">Info</a>'
             else:
                 link_html = ""
-            added_html = f'<span class="added-badge">{added_label}</span>' if added_label else ""
             rows_html += f"""<tr class="{row_class}">
         <td class="td-artist">{artist}</td>
         <td class="td-venue">{venue_display}</td>
-        <td class="td-added">{added_html}</td>
+        <td class="td-date">{show_date_display}</td>
         <td class="td-link">{link_html}</td>
       </tr>"""
 
         date_sections_html += f"""
-  <div class="date-section" data-date="{date_key}">
+  <div class="date-section" data-date="{added_date_key}">
     <div class="date-heading">
       <div class="date-label">{date_label}{today_badge}</div>
       <div class="date-event-count">{len(group_list)} show{"s" if len(group_list) != 1 else ""}</div>
@@ -1563,7 +1573,7 @@ def generate_new_events_html(events: list[dict]) -> str:
         <tr>
           <th>Artist / Event</th>
           <th>Venue</th>
-          <th>Added</th>
+          <th>Show Date</th>
           <th></th>
         </tr>
       </thead>
@@ -1822,20 +1832,12 @@ def generate_new_events_html(events: list[dict]) -> str:
     width: 40%;
   }}
 
-  .td-added {{
+  .td-date {{
     width: 90px;
     white-space: nowrap;
-  }}
-
-  .added-badge {{
     font-family: var(--font-mono);
-    font-size: 0.65rem;
-    letter-spacing: 0.06em;
-    color: var(--gray-dim);
-    background: var(--navy-mid);
-    padding: 2px 7px;
-    border-radius: 3px;
-    border: 1px solid var(--border);
+    font-size: 0.75rem;
+    color: var(--gray);
   }}
 
   .td-link {{
@@ -1889,7 +1891,7 @@ def generate_new_events_html(events: list[dict]) -> str:
     .header-count {{ display: none; }}
     .search-wrap {{ width: 160px; margin-right: 8px; }}
     .date-label {{ font-size: 1.3rem; }}
-    .td-added {{ display: none; }}
+    .td-date {{ display: none; }}
     .view-toggle {{ display: none; }}
   }}
 </style>
